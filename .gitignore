@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Build
+dist/
+build/
+.next/
+.vercel/
+
+# iOS
+ios/DerivedData/
+ios/*.xcworkspace
+ios/Pods/
+ios/.build/
+*.ipa
+
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+*.apk
+*.aab
+
+# IDE
+.idea/
+*.xcuserdata/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Keys & secrets
+*.keystore
+*.jks
+*.p12
+*.pem
+*.key
