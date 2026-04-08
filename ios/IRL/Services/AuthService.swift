@@ -1,7 +1,7 @@
+import Combine
 import Foundation
 import LocalAuthentication
 
-@MainActor
 final class AuthService: ObservableObject {
 
     @Published private(set) var isAuthenticated = false

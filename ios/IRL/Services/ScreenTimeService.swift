@@ -1,11 +1,12 @@
 import Foundation
 import Combine
 
-@MainActor
 final class ScreenTimeService: ObservableObject {
 
     static let defaultLimit: TimeInterval = 3600 // 1 hour
     private static let warningThreshold: TimeInterval = 300 // 5 minutes
+    private static let elapsedKey = "irl_screen_time_elapsed"
+    private static let dateKey = "irl_screen_time_date"
 
     @Published private(set) var elapsedSeconds: TimeInterval = 0
     @Published private(set) var isWarningShown = false
@@ -29,8 +30,9 @@ final class ScreenTimeService: ObservableObject {
 
     private var timer: Timer?
 
-    init(dailyLimit: TimeInterval = ScreenTimeService.defaultLimit) {
+    init(dailyLimit: TimeInterval = 3600) {
         self.dailyLimit = dailyLimit
+        loadPersistedTime()
     }
 
     func start() {
@@ -45,6 +47,7 @@ final class ScreenTimeService: ObservableObject {
     func stop() {
         timer?.invalidate()
         timer = nil
+        persist()
     }
 
     private func tick() {
@@ -54,5 +57,38 @@ final class ScreenTimeService: ObservableObject {
         }
         elapsedSeconds += 1
         isWarningShown = remainingSeconds <= Self.warningThreshold && remainingSeconds > 0
+
+        // Persist every 10 seconds
+        if Int(elapsedSeconds) % 10 == 0 {
+            persist()
+        }
+    }
+
+    // MARK: - Persistence
+
+    private func persist() {
+        let today = todayString()
+        UserDefaults.standard.set(elapsedSeconds, forKey: Self.elapsedKey)
+        UserDefaults.standard.set(today, forKey: Self.dateKey)
+    }
+
+    private func loadPersistedTime() {
+        let savedDate = UserDefaults.standard.string(forKey: Self.dateKey) ?? ""
+        let today = todayString()
+
+        if savedDate == today {
+            // Same day — restore elapsed time
+            elapsedSeconds = UserDefaults.standard.double(forKey: Self.elapsedKey)
+        } else {
+            // New day — reset
+            elapsedSeconds = 0
+            persist()
+        }
+    }
+
+    private func todayString() -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: Date())
     }
 }

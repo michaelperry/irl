@@ -2,7 +2,7 @@ import SwiftUI
 
 struct MainTabView: View {
 
-    @State private var selectedTab = 0
+    @State private var selectedTab = 1
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -20,7 +20,7 @@ struct MainTabView: View {
 
             ProfileView()
                 .tabItem {
-                    Label("You", systemImage: "person.fill")
+                    Label("You", systemImage: "globe.americas.fill")
                 }
                 .tag(2)
         }
@@ -32,4 +32,5 @@ struct MainTabView: View {
     MainTabView()
         .environmentObject(AuthService())
         .environmentObject(ScreenTimeService())
+        .environmentObject(PostStore())
 }
