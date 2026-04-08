@@ -1,0 +1,7 @@
+{
+  "buildCommand": "npx tsc",
+  "outputDirectory": "dist",
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api" }
+  ]
+}
