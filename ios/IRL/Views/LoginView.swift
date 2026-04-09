@@ -110,7 +110,7 @@ struct LoginView: View {
                             ValuePill(icon: "eye.slash.fill", text: "No Ads")
                         }
                         HStack(spacing: 16) {
-                            ValuePill(icon: "heart.fill", text: "Kindness Please")
+                            ValuePill(icon: "heart.fill", text: "Always Be Kind")
                         }
                     }
                     .padding(.top, 28)

@@ -1,4 +1,5 @@
 import { createMiddleware } from "hono/factory";
+import { jwtVerify } from "jose";
 import { createDb, schema } from "../db/index.js";
 import { eq } from "drizzle-orm";
 import type { AppVariables } from "../types.js";
@@ -12,9 +13,8 @@ export const authMiddleware = createMiddleware<{ Variables: AppVariables }>(asyn
   const token = authHeader.slice(7);
 
   try {
-    // TODO: Verify JWT signature against user's registered public key
-    // For now, decode the payload to extract userId
-    const payload = JSON.parse(atob(token.split(".")[1]));
+    const secret = new TextEncoder().encode(process.env.JWT_SECRET);
+    const { payload } = await jwtVerify(token, secret, { algorithms: ["HS256"] });
     const userId = payload.sub;
 
     if (!userId) {

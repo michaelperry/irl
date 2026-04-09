@@ -1,8 +1,18 @@
 import { Hono } from "hono";
+import { SignJWT } from "jose";
 import { createDb, schema } from "../db/index.js";
 import { eq } from "drizzle-orm";
 
 const auth = new Hono();
+
+async function generateToken(userId: string): Promise<string> {
+  const secret = new TextEncoder().encode(process.env.JWT_SECRET);
+  return new SignJWT({ sub: userId })
+    .setProtectedHeader({ alg: "HS256" })
+    .setIssuedAt()
+    .setExpirationTime("30d")
+    .sign(secret);
+}
 
 // Register a new user with their public key and biometric attestation
 auth.post("/register", async (c) => {
@@ -35,7 +45,8 @@ auth.post("/register", async (c) => {
     })
     .returning({ id: schema.users.id, createdAt: schema.users.createdAt });
 
-  return c.json({ user }, 201);
+  const token = await generateToken(user.id);
+  return c.json({ user, token }, 201);
 });
 
 // Login — verify biometric challenge and return session
@@ -61,11 +72,11 @@ auth.post("/login", async (c) => {
   // TODO: Verify signedChallenge against user's publicKey
   // This ensures the device that registered is the one logging in
 
+  const token = await generateToken(user.id);
   return c.json({
     userId: user.id,
     screenLimitSeconds: user.dailyScreenLimitSeconds,
-    // TODO: Return signed JWT
-    token: "placeholder",
+    token,
   });
 });
 

@@ -54,6 +54,11 @@ final class PostStore: ObservableObject {
         posts.insert(post, at: 0)
         myPosts.insert(post, at: 0)
         persist()
+
+        // Sync to server in background
+        Task {
+            await uploadPostToServer(post: post, imageData: data)
+        }
     }
 
     // MARK: - Save video
@@ -197,5 +202,51 @@ final class PostStore: ObservableObject {
         }
         myPosts = posts.filter { $0.authorId == "me" }
         persist() // Save fuzzed versions
+    }
+
+    // MARK: - Server Sync
+
+    private func uploadPostToServer(post: Post, imageData: Data) async {
+        guard KeychainService.isLoggedIn else { return }
+
+        // Encode image as base64 for server storage (temporary approach)
+        // In production, this would upload to blob storage
+        let base64 = imageData.base64EncodedString()
+
+        let contentJson: [String: Any] = [
+            "caption": post.caption ?? "",
+            "mediaType": post.mediaType.rawValue,
+            "trustLevel": post.trustLevel.rawValue,
+            "aspectRatio": post.aspectRatio,
+            "location": post.location.map { ["lat": $0.latitude, "lon": $0.longitude] } as Any,
+        ]
+
+        let contentString = (try? JSONSerialization.data(withJSONObject: contentJson))
+            .flatMap { String(data: $0, encoding: .utf8) }
+
+        do {
+            _ = try await APIClient.shared.createPost(
+                content: contentString,
+                mediaBase64: base64,
+                mediaKey: nil
+            )
+            print("[IRL] Post synced to server")
+        } catch {
+            print("[IRL] Failed to sync post: \(error.localizedDescription)")
+            // Post is saved locally — will retry on next launch
+        }
+    }
+
+    /// Fetch posts from server and merge with local
+    func syncFromServer() async {
+        guard KeychainService.isLoggedIn else { return }
+
+        do {
+            let feed = try await APIClient.shared.getFeed(limit: 50)
+            print("[IRL] Fetched \(feed.posts.count) posts from server")
+            // Server posts will be integrated when we build the full sync layer
+        } catch {
+            print("[IRL] Feed sync failed: \(error.localizedDescription)")
+        }
     }
 }
