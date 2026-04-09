@@ -21,6 +21,7 @@ struct ProfileView: View {
     @State private var photoPickerItem: PhotosPickerItem?
     @State private var showSettings = false
     @State private var showInvite = false
+    @State private var showWorldMap = false
     @AppStorage("irl_show_pins") private var showPinsOnGlobe = true
 
     private var postLocations: [PostLocation] {
@@ -64,6 +65,9 @@ struct ProfileView: View {
             .fullScreenCover(item: $selectedPost) { post in
                 PostDetailView(post: post, postStore: postStore)
             }
+            .fullScreenCover(isPresented: $showWorldMap) {
+                WorldMapView(posts: postStore.myPosts, postStore: postStore)
+            }
             .sheet(isPresented: $showInvite) {
                 InviteFriendView()
                     .presentationDetents([.medium])
@@ -96,10 +100,11 @@ struct ProfileView: View {
 
     private var headerSection: some View {
         ZStack(alignment: .bottom) {
-            // Earth banner
+            // Earth banner — tap to open interactive map
             EarthView(autoRotate: false, pins: showPinsOnGlobe ? postLocations : [])
                 .frame(height: 200)
                 .clipped()
+                .onTapGesture { showWorldMap = true }
                 .overlay(
                     LinearGradient(
                         stops: [
@@ -290,21 +295,26 @@ struct ProfileView: View {
     private var photoGrid: some View {
         VStack(alignment: .leading, spacing: 12) {
             // Section header
-            HStack {
-                Text("Your World")
-                    .font(.system(size: 17, weight: .bold, design: .rounded))
-                    .foregroundStyle(IRLColors.primaryText)
-                Spacer()
-                if !postLocations.isEmpty {
-                    HStack(spacing: 4) {
-                        Image(systemName: "mappin.circle.fill")
-                            .font(.system(size: 12))
-                        Text("\(postLocations.count) pins")
-                            .font(.system(size: 12, weight: .medium, design: .rounded))
+            Button { showWorldMap = true } label: {
+                HStack {
+                    Text("Your World")
+                        .font(.system(size: 17, weight: .bold, design: .rounded))
+                        .foregroundStyle(IRLColors.primaryText)
+                    Spacer()
+                    if !postLocations.isEmpty {
+                        HStack(spacing: 4) {
+                            Image(systemName: "mappin.circle.fill")
+                                .font(.system(size: 12))
+                            Text("\(postLocations.count) pins")
+                                .font(.system(size: 12, weight: .medium, design: .rounded))
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 10, weight: .semibold))
+                        }
+                        .foregroundStyle(IRLColors.earthGreen)
                     }
-                    .foregroundStyle(IRLColors.earthGreen)
                 }
             }
+            .buttonStyle(.plain)
             .padding(.horizontal, 16)
 
             if postStore.myPosts.isEmpty {
@@ -404,6 +414,9 @@ private struct PostDetailView: View {
     let postStore: PostStore
     @Environment(\.dismiss) private var dismiss
     @State private var dragOffset: CGSize = .zero
+    @State private var isEditingCaption = false
+    @State private var editedCaption: String = ""
+    @State private var showDeleteConfirm = false
 
     var body: some View {
         ZStack {
@@ -412,19 +425,41 @@ private struct PostDetailView: View {
             VStack(spacing: 0) {
                 // Top bar
                 HStack {
-                    Button {
-                        dismiss()
-                    } label: {
+                    Button { dismiss() } label: {
                         Image(systemName: "xmark")
                             .font(.system(size: 16, weight: .bold))
-                            .foregroundStyle(IRLColors.primaryText)
+                            .foregroundStyle(.white)
                             .padding(10)
-                            .background(.ultraThinMaterial, in: Circle())
+                            .background(.black.opacity(0.4), in: Circle())
                     }
+
                     Spacer()
+
                     Text(post.createdAt, style: .date)
                         .font(.system(size: 13, weight: .medium, design: .rounded))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.white.opacity(0.6))
+
+                    // Edit/Delete menu
+                    Menu {
+                        Button {
+                            editedCaption = post.caption ?? ""
+                            isEditingCaption = true
+                        } label: {
+                            Label("Edit Caption", systemImage: "pencil")
+                        }
+                        Button(role: .destructive) {
+                            showDeleteConfirm = true
+                        } label: {
+                            Label("Delete Post", systemImage: "trash")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 44, height: 44)
+                            .background(.black.opacity(0.4))
+                            .clipShape(Circle())
+                    }
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
@@ -452,11 +487,37 @@ private struct PostDetailView: View {
                             }
                     )
 
-                // Caption
-                if let caption = post.caption, !caption.isEmpty {
+                // Caption editing or display
+                if isEditingCaption {
+                    HStack(spacing: 10) {
+                        TextField("Edit caption...", text: $editedCaption)
+                            .font(.system(size: 15, design: .rounded))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .background(.white.opacity(0.15))
+                            .clipShape(RoundedRectangle(cornerRadius: 20))
+
+                        Button {
+                            let cap = editedCaption.trimmingCharacters(in: .whitespacesAndNewlines)
+                            postStore.updateCaption(for: post.id, newCaption: cap.isEmpty ? nil : cap)
+                            isEditingCaption = false
+                        } label: {
+                            Text("Save")
+                                .font(.system(size: 15, weight: .bold, design: .rounded))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 18)
+                                .padding(.vertical, 10)
+                                .background(IRLColors.oceanBlue)
+                                .clipShape(Capsule())
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                } else if let caption = post.caption, !caption.isEmpty {
                     Text(caption)
                         .font(.system(size: 16, weight: .regular, design: .rounded))
-                        .foregroundStyle(IRLColors.primaryText)
+                        .foregroundStyle(.white)
                         .padding(.horizontal, 20)
                         .padding(.top, 16)
                 }
@@ -464,7 +525,15 @@ private struct PostDetailView: View {
                 Spacer()
             }
         }
-        // theme controlled globally from IRLApp
+        .alert("Delete this post?", isPresented: $showDeleteConfirm) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) {
+                postStore.deletePost(post)
+                dismiss()
+            }
+        } message: {
+            Text("This will permanently delete this photo/video.")
+        }
     }
 
     @ViewBuilder

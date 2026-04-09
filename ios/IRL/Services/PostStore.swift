@@ -40,7 +40,7 @@ final class PostStore: ObservableObject {
 
         let aspectRatio = Double(image.size.width / image.size.height)
         let loc = LocationService.shared.currentLocation
-        let postLocation = loc.map { PostLocation(latitude: $0.coordinate.latitude, longitude: $0.coordinate.longitude) }
+        let postLocation = loc.map { PostLocation.fuzzy(latitude: $0.coordinate.latitude, longitude: $0.coordinate.longitude) }
 
         let post = Post(
             mediaType: .photo,
@@ -78,7 +78,7 @@ final class PostStore: ObservableObject {
         let aspectRatio = Double(size.width / size.height)
 
         let loc = LocationService.shared.currentLocation
-        let postLocation = loc.map { PostLocation(latitude: $0.coordinate.latitude, longitude: $0.coordinate.longitude) }
+        let postLocation = loc.map { PostLocation.fuzzy(latitude: $0.coordinate.latitude, longitude: $0.coordinate.longitude) }
 
         let post = Post(
             mediaType: isShort ? .short : .video,
@@ -112,6 +112,60 @@ final class PostStore: ObservableObject {
 
     // MARK: - Load image helper
 
+    // MARK: - Delete post
+
+    func deletePost(_ post: Post) {
+        // Delete media files
+        let mediaURL = Self.mediaURL(for: post.mediaFilename)
+        try? FileManager.default.removeItem(at: mediaURL)
+        if let thumb = post.thumbnailFilename {
+            try? FileManager.default.removeItem(at: Self.mediaURL(for: thumb))
+        }
+
+        posts.removeAll { $0.id == post.id }
+        myPosts.removeAll { $0.id == post.id }
+        persist()
+    }
+
+    // MARK: - Update caption
+
+    func updateCaption(for postId: UUID, newCaption: String?) {
+        if let index = posts.firstIndex(where: { $0.id == postId }) {
+            let old = posts[index]
+            let updated = Post(
+                authorId: old.authorId,
+                authorName: old.authorName,
+                mediaType: old.mediaType,
+                mediaFilename: old.mediaFilename,
+                thumbnailFilename: old.thumbnailFilename,
+                caption: newCaption,
+                aspectRatio: old.aspectRatio,
+                location: old.location,
+                trustLevel: old.trustLevel
+            )
+            // Preserve original id and date
+            posts[index] = updated
+        }
+        if let index = myPosts.firstIndex(where: { $0.id == postId }) {
+            let old = myPosts[index]
+            let updated = Post(
+                authorId: old.authorId,
+                authorName: old.authorName,
+                mediaType: old.mediaType,
+                mediaFilename: old.mediaFilename,
+                thumbnailFilename: old.thumbnailFilename,
+                caption: newCaption,
+                aspectRatio: old.aspectRatio,
+                location: old.location,
+                trustLevel: old.trustLevel
+            )
+            myPosts[index] = updated
+        }
+        persist()
+    }
+
+    // MARK: - Load image helper
+
     func loadImage(filename: String) -> UIImage? {
         let url = Self.mediaURL(for: filename)
         guard let data = try? Data(contentsOf: url) else { return nil }
@@ -129,7 +183,19 @@ final class PostStore: ObservableObject {
     private func load() {
         guard let data = UserDefaults.standard.data(forKey: postsKey),
               let decoded = try? JSONDecoder().decode([Post].self, from: data) else { return }
-        posts = decoded
-        myPosts = decoded.filter { $0.authorId == "me" }
+        // Fuzz any existing precise locations to city level
+        posts = decoded.map { post in
+            guard let loc = post.location else { return post }
+            let fuzzed = PostLocation.fuzzy(latitude: loc.latitude, longitude: loc.longitude)
+            if fuzzed.latitude == loc.latitude && fuzzed.longitude == loc.longitude { return post }
+            return Post(
+                authorId: post.authorId, authorName: post.authorName,
+                mediaType: post.mediaType, mediaFilename: post.mediaFilename,
+                thumbnailFilename: post.thumbnailFilename, caption: post.caption,
+                aspectRatio: post.aspectRatio, location: fuzzed, trustLevel: post.trustLevel
+            )
+        }
+        myPosts = posts.filter { $0.authorId == "me" }
+        persist() // Save fuzzed versions
     }
 }

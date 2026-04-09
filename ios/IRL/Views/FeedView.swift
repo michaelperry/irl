@@ -134,6 +134,7 @@ struct FeedView: View {
     @State private var sortOrder: FeedSort = .chronological
     @State private var showWhySheet = false
     @State private var selectedWhyPost: Post?
+    @State private var showWorldMap = false
 
     var body: some View {
         NavigationStack {
@@ -204,6 +205,13 @@ struct FeedView: View {
 
                         Divider()
 
+                        // World map
+                        Button {
+                            showWorldMap = true
+                        } label: {
+                            Label("Explore Pins", systemImage: "map.fill")
+                        }
+
                         // Transparency
                         Button {
                             showFeedSettings = true
@@ -229,6 +237,9 @@ struct FeedView: View {
             }
             .toolbarBackground(IRLColors.deepSpace, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
+            .fullScreenCover(isPresented: $showWorldMap) {
+                WorldMapView(posts: postStore.posts, postStore: postStore)
+            }
             .sheet(isPresented: $showFeedSettings) {
                 FeedTransparencyView(feedFilter: $feedFilter, sortOrder: $sortOrder)
                     .presentationDetents([.large])
@@ -397,6 +408,7 @@ private struct FeedPostCard: View {
     @State private var myReactions: Set<String> = []
     @State private var showReactionBar = false
     @State private var showMoreEmojis = false
+    @State private var showPostDetail = false
 
     // Path-inspired primary reactions
     private let quickReactions = ["❤️", "😂", "😮", "😢", "🔥"]
@@ -434,8 +446,12 @@ private struct FeedPostCard: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
 
-            // Media — edge to edge, no padding, no rounding
+            // Media — edge to edge, tappable for detail
             mediaContent
+                .onTapGesture { showPostDetail = true }
+                .fullScreenCover(isPresented: $showPostDetail) {
+                    FeedPostDetailView(post: post, postStore: postStore)
+                }
 
             // Actions + Caption
             VStack(alignment: .leading, spacing: 8) {
@@ -472,15 +488,14 @@ private struct FeedPostCard: View {
                 // Reaction drawer
                 if showReactionBar {
                     VStack(spacing: 8) {
-                        // Quick reactions
-                        HStack(spacing: 12) {
+                        // Quick reactions — generous spacing
+                        HStack(spacing: 4) {
                             ForEach(Array(quickReactions.enumerated()), id: \.element) { index, emoji in
                                 Button {
                                     withAnimation(.spring(response: 0.25, dampingFraction: 0.6)) {
                                         toggleReaction(emoji)
                                     }
-                                    // Auto-close after picking
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                                         withAnimation(.easeOut(duration: 0.2)) {
                                             showReactionBar = false
                                             showMoreEmojis = false
@@ -488,49 +503,40 @@ private struct FeedPostCard: View {
                                     }
                                 } label: {
                                     Text(emoji)
-                                        .font(.system(size: 30))
+                                        .font(.system(size: 28))
                                         .scaleEffect(myReactions.contains(emoji) ? 1.15 : 1.0)
-                                        .frame(width: 44, height: 44)
+                                        .frame(width: 48, height: 48)
+                                        .background(myReactions.contains(emoji) ? IRLColors.oceanBlue.opacity(0.15) : .clear)
+                                        .clipShape(RoundedRectangle(cornerRadius: 12))
                                         .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
-                                .transition(
-                                    .asymmetric(
-                                        insertion: .scale(scale: 0.1).combined(with: .opacity)
-                                            .animation(.spring(response: 0.35, dampingFraction: 0.6).delay(Double(index) * 0.04)),
-                                        removal: .scale(scale: 0.5).combined(with: .opacity)
-                                            .animation(.easeOut(duration: 0.15))
-                                    )
-                                )
                             }
-
-                            Rectangle()
-                                .fill(.white.opacity(0.15))
-                                .frame(width: 1, height: 24)
 
                             Button {
                                 withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                                     showMoreEmojis.toggle()
                                 }
                             } label: {
-                                Image(systemName: "plus")
-                                    .font(.system(size: 18, weight: .medium))
+                                Image(systemName: showMoreEmojis ? "xmark" : "plus")
+                                    .font(.system(size: 16, weight: .semibold))
                                     .foregroundStyle(.white.opacity(0.5))
-                                    .rotationEffect(.degrees(showMoreEmojis ? 45 : 0))
-                                    .frame(width: 40, height: 40)
+                                    .frame(width: 48, height: 48)
+                                    .background(.white.opacity(0.08))
+                                    .clipShape(RoundedRectangle(cornerRadius: 12))
                                     .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
                         }
 
                         if showMoreEmojis {
-                            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 2), count: 8), spacing: 8) {
+                            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 6), spacing: 6) {
                                 ForEach(moreEmojis, id: \.self) { emoji in
                                     Button {
                                         withAnimation(.spring(response: 0.25, dampingFraction: 0.6)) {
                                             toggleReaction(emoji)
                                         }
-                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                                             withAnimation(.easeOut(duration: 0.2)) {
                                                 showReactionBar = false
                                                 showMoreEmojis = false
@@ -539,12 +545,15 @@ private struct FeedPostCard: View {
                                     } label: {
                                         Text(emoji)
                                             .font(.system(size: 26))
-                                            .frame(maxWidth: .infinity)
-                                            .padding(.vertical, 4)
+                                            .frame(width: 44, height: 44)
+                                            .background(myReactions.contains(emoji) ? IRLColors.oceanBlue.opacity(0.15) : .clear)
+                                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                                            .contentShape(Rectangle())
                                     }
                                     .buttonStyle(.plain)
                                 }
                             }
+                            .padding(.top, 4)
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                         }
                     }
@@ -621,19 +630,6 @@ private struct FeedPostCard: View {
             Rectangle()
                 .fill(.white.opacity(0.06))
                 .frame(height: 0.5)
-        }
-        .background {
-            // Tap anywhere to dismiss emoji drawer
-            if showReactionBar {
-                Color.black.opacity(0.01)
-                    .ignoresSafeArea()
-                    .onTapGesture {
-                        withAnimation(.easeOut(duration: 0.2)) {
-                            showReactionBar = false
-                            showMoreEmojis = false
-                        }
-                    }
-            }
         }
     }
 
@@ -953,7 +949,7 @@ private struct FeedTransparencyView: View {
                             .foregroundStyle(IRLColors.primaryText)
                         Text("IRL gives you full control over what you see. No hidden algorithms, no engagement tricks, no manipulation.")
                             .font(.system(size: 15, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.5))
+                            .foregroundStyle(IRLColors.secondaryText)
                     }
                     .padding(.horizontal, 20)
                     .padding(.top, 16)
@@ -978,7 +974,7 @@ private struct FeedTransparencyView: View {
                                             .foregroundStyle(IRLColors.primaryText)
                                         Text(filter.transparencyDescription)
                                             .font(.system(size: 13, design: .rounded))
-                                            .foregroundStyle(.white.opacity(0.4))
+                                            .foregroundStyle(IRLColors.secondaryText)
                                     }
 
                                     Spacer()
@@ -989,7 +985,7 @@ private struct FeedTransparencyView: View {
                                     }
                                 }
                                 .padding(14)
-                                .background(feedFilter == filter ? .white.opacity(0.06) : .clear)
+                                .background(feedFilter == filter ? IRLColors.oceanBlue.opacity(0.1) : IRLColors.cardBackground.opacity(0.5))
                                 .clipShape(RoundedRectangle(cornerRadius: 12))
                             }
                             .buttonStyle(.plain)
@@ -1023,7 +1019,7 @@ private struct FeedTransparencyView: View {
                                     }
                                 }
                                 .padding(14)
-                                .background(sortOrder == sort ? .white.opacity(0.06) : .clear)
+                                .background(sortOrder == sort ? IRLColors.oceanBlue.opacity(0.1) : IRLColors.cardBackground.opacity(0.5))
                                 .clipShape(RoundedRectangle(cornerRadius: 12))
                             }
                             .buttonStyle(.plain)
@@ -1043,7 +1039,7 @@ private struct FeedTransparencyView: View {
                             promiseRow(icon: "clock", text: "Chronological is always available — your default")
                         }
                         .padding(16)
-                        .background(.white.opacity(0.04))
+                        .background(IRLColors.cardBackground.opacity(0.5))
                         .clipShape(RoundedRectangle(cornerRadius: 14))
                     }
                     .padding(.horizontal, 20)
@@ -1051,7 +1047,7 @@ private struct FeedTransparencyView: View {
                     Spacer(minLength: 40)
                 }
             }
-            .background(Color(white: 0.06).ignoresSafeArea())
+            .background(IRLColors.deepSpace.ignoresSafeArea())
             .navigationTitle("Feed Transparency")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -1061,7 +1057,7 @@ private struct FeedTransparencyView: View {
                         .foregroundStyle(IRLColors.oceanBlue)
                 }
             }
-            .toolbarBackground(Color(white: 0.06), for: .navigationBar)
+            .toolbarBackground(IRLColors.deepSpace, for: .navigationBar)
         }
         // theme controlled globally from IRLApp
     }
@@ -1069,7 +1065,7 @@ private struct FeedTransparencyView: View {
     private func sectionHeader(_ title: String) -> some View {
         Text(title.uppercased())
             .font(.system(size: 12, weight: .bold, design: .rounded))
-            .foregroundStyle(.white.opacity(0.3))
+            .foregroundStyle(IRLColors.oceanBlue)
             .tracking(1)
     }
 
@@ -1081,9 +1077,172 @@ private struct FeedTransparencyView: View {
                 .frame(width: 22)
             Text(text)
                 .font(.system(size: 14, design: .rounded))
-                .foregroundStyle(.white.opacity(0.7))
+                .foregroundStyle(IRLColors.primaryText.opacity(0.8))
         }
     }
+}
+
+// MARK: - Feed Post Detail (Fullscreen)
+
+private struct FeedPostDetailView: View {
+    let post: Post
+    let postStore: PostStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var player: AVPlayer?
+    @State private var isEditingCaption = false
+    @State private var editedCaption: String = ""
+    @State private var showDeleteConfirm = false
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            // Media
+            switch post.mediaType {
+            case .photo:
+                if let image = postStore.loadImage(filename: post.mediaFilename) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            case .video, .short:
+                if let player {
+                    VideoPlayerRepresentable(player: player)
+                        .ignoresSafeArea()
+                }
+            }
+
+            // Overlay controls
+            VStack {
+                HStack {
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 44, height: 44)
+                            .background(.black.opacity(0.4))
+                            .clipShape(Circle())
+                    }
+
+                    Spacer()
+
+                    TrustBadgeView(level: post.trustLevel)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(.black.opacity(0.4))
+                        .clipShape(Capsule())
+
+                    // Edit/Delete menu (only for your posts)
+                    if post.authorId == "me" {
+                        Menu {
+                            Button {
+                                editedCaption = post.caption ?? ""
+                                isEditingCaption = true
+                            } label: {
+                                Label("Edit Caption", systemImage: "pencil")
+                            }
+                            Button(role: .destructive) {
+                                showDeleteConfirm = true
+                            } label: {
+                                Label("Delete Post", systemImage: "trash")
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 44, height: 44)
+                                .background(.black.opacity(0.4))
+                                .clipShape(Circle())
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+
+                Spacer()
+
+                // Caption
+                VStack(alignment: .leading, spacing: 4) {
+                    if isEditingCaption {
+                        HStack(spacing: 10) {
+                            TextField("Edit caption...", text: $editedCaption)
+                                .font(.system(size: 15, design: .rounded))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 10)
+                                .background(.white.opacity(0.15))
+                                .clipShape(RoundedRectangle(cornerRadius: 20))
+
+                            Button {
+                                let cap = editedCaption.trimmingCharacters(in: .whitespacesAndNewlines)
+                                postStore.updateCaption(for: post.id, newCaption: cap.isEmpty ? nil : cap)
+                                isEditingCaption = false
+                            } label: {
+                                Text("Save")
+                                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 18)
+                                    .padding(.vertical, 10)
+                                    .background(IRLColors.oceanBlue)
+                                    .clipShape(Capsule())
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 16)
+                    } else if let caption = post.caption, !caption.isEmpty {
+                        HStack {
+                            Text(post.authorName)
+                                .font(.system(size: 15, weight: .bold, design: .rounded))
+                            Text(caption)
+                                .font(.system(size: 15, design: .rounded))
+                        }
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(16)
+                    }
+                }
+                .background(
+                    LinearGradient(colors: [.clear, .black.opacity(0.7)], startPoint: .top, endPoint: .bottom)
+                )
+            }
+        }
+        .alert("Delete this post?", isPresented: $showDeleteConfirm) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) {
+                postStore.deletePost(post)
+                dismiss()
+            }
+        } message: {
+            Text("This will permanently delete this photo/video.")
+        }
+        .onAppear {
+            if post.mediaType == .video || post.mediaType == .short {
+                let url = PostStore.mediaURL(for: post.mediaFilename)
+                player = AVPlayer(url: url)
+                player?.play()
+            }
+        }
+        .onDisappear {
+            player?.pause()
+        }
+    }
+}
+
+// MARK: - Video Player Controller
+
+private struct VideoPlayerRepresentable: UIViewControllerRepresentable {
+    let player: AVPlayer
+
+    func makeUIViewController(context: Context) -> AVPlayerViewController {
+        let vc = AVPlayerViewController()
+        vc.player = player
+        vc.showsPlaybackControls = true
+        vc.videoGravity = .resizeAspect
+        return vc
+    }
+
+    func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 
 #Preview {

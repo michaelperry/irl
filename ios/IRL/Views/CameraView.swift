@@ -409,28 +409,32 @@ struct CameraView: View {
     // MARK: - Preview (after capture)
 
     private var previewContent: some View {
-        ZStack {
+        ZStack(alignment: .bottom) {
             Color.black.ignoresSafeArea()
 
-            if let photo = camera.capturedPhoto {
-                Image(uiImage: photo)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let videoURL = camera.recordedVideoURL,
-                      let thumb = generateThumbnail(for: videoURL) {
-                Image(uiImage: thumb)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .overlay {
-                        Image(systemName: "play.circle.fill")
-                            .font(.system(size: 64))
-                            .foregroundStyle(.white.opacity(0.8))
-                    }
+            // Media preview — shrinks when keyboard appears
+            GeometryReader { geo in
+                if let photo = camera.capturedPhoto {
+                    Image(uiImage: photo)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let videoURL = camera.recordedVideoURL,
+                          let thumb = generateThumbnail(for: videoURL) {
+                    Image(uiImage: thumb)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .overlay {
+                            Image(systemName: "play.circle.fill")
+                                .font(.system(size: 64))
+                                .foregroundStyle(.white.opacity(0.8))
+                        }
+                }
             }
 
-            VStack {
+            // Controls overlay — uses VStack that keyboard can push up
+            VStack(spacing: 0) {
                 HStack {
                     Button { retake() } label: {
                         HStack(spacing: 6) {
@@ -446,7 +450,6 @@ struct CameraView: View {
                     }
                     Spacer()
 
-                    // Trust level badge
                     TrustBadgeView(level: importedTrustLevel)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
@@ -546,7 +549,10 @@ struct CameraView: View {
                 )
             }
         }
-        .scrollDismissesKeyboard(.interactively)
+        .ignoresSafeArea(.container, edges: .top)
+        .onTapGesture {
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        }
     }
 
     // MARK: - Posted overlay

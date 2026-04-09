@@ -31,6 +31,16 @@ enum TrustLevel: String, Codable {
 struct PostLocation: Codable {
     let latitude: Double
     let longitude: Double
+
+    /// Rounds coordinates to city level (~11km precision).
+    /// IRL never stores or shares your precise location.
+    static func fuzzy(latitude: Double, longitude: Double) -> PostLocation {
+        // Round to 1 decimal place ≈ 11km precision (city level)
+        PostLocation(
+            latitude: (latitude * 10).rounded() / 10,
+            longitude: (longitude * 10).rounded() / 10
+        )
+    }
 }
 
 struct Post: Identifiable, Codable {
