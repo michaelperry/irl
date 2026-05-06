@@ -10,6 +10,7 @@ import comments from "./routes/comments.js";
 import safety from "./routes/safety.js";
 import invites from "./routes/invites.js";
 import activity from "./routes/activity.js";
+import messages from "./routes/messages.js";
 
 import type { AppVariables } from "./types.js";
 
@@ -34,5 +35,6 @@ app.route("/comments", comments);
 app.route("/safety", safety);
 app.route("/invites", invites);
 app.route("/activity", activity);
+app.route("/messages", messages);
 
 export default app;

@@ -223,6 +223,57 @@ final class APIClient {
         let _: R = try await post(path: "/activity/mark-read", body: [:], authenticated: true)
     }
 
+    // MARK: - Messages (DMs)
+
+    struct ConversationsResponse: Codable {
+        let conversations: [ConversationSummary]
+    }
+
+    struct ConversationDetailResponse: Codable {
+        struct Convo: Codable {
+            let id: String
+            let otherId: String
+        }
+        let conversation: Convo
+        let messages: [Message]
+        let hasMore: Bool
+        let nextCursor: String?
+    }
+
+    func listConversations() async throws -> [ConversationSummary] {
+        let r: ConversationsResponse = try await get(path: "/messages", authenticated: true)
+        return r.conversations
+    }
+
+    func unreadMessageCount() async throws -> Int {
+        struct R: Codable { let unread: Int }
+        let r: R = try await get(path: "/messages/unread-count", authenticated: true)
+        return r.unread
+    }
+
+    func getConversation(withUserId otherId: String, before: String? = nil, limit: Int = 50) async throws -> ConversationDetailResponse {
+        var path = "/messages/with/\(otherId)?limit=\(limit)"
+        if let before, let encoded = before.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
+            path += "&before=\(encoded)"
+        }
+        return try await get(path: path, authenticated: true)
+    }
+
+    func sendMessage(toUserId otherId: String, ciphertext: String, envelopes: [(recipientId: String, sealedKey: String)]) async throws -> Message {
+        var body: [String: Any] = ["ciphertext": ciphertext]
+        if !envelopes.isEmpty {
+            body["envelopes"] = envelopes.map { ["recipientId": $0.recipientId, "sealedKey": $0.sealedKey] }
+        }
+        struct R: Codable { let message: Message }
+        let r: R = try await post(path: "/messages/with/\(otherId)", body: body, authenticated: true)
+        return r.message
+    }
+
+    func markConversationRead(conversationId: String) async throws {
+        struct R: Codable { let marked: Bool }
+        let _: R = try await post(path: "/messages/\(conversationId)/mark-read", body: [:], authenticated: true)
+    }
+
     func registerAPNsToken(token: String, deviceId: String, environment: String) async throws {
         struct R: Codable { let registered: Bool }
         let _: R = try await post(

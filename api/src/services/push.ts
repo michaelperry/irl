@@ -14,7 +14,8 @@ import { eq } from "drizzle-orm";
 export type PushKind =
   | { type: "comment"; postId: string; commentId: string; actorId: string }
   | { type: "reaction"; postId: string; actorId: string; kind: string }
-  | { type: "follow"; actorId: string };
+  | { type: "follow"; actorId: string }
+  | { type: "message"; conversationId: string; messageId: string; actorId: string };
 
 export async function notifyUser(recipientId: string, payload: PushKind): Promise<void> {
   // 1. Write the in-app activity row (source of truth for the bell)

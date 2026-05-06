@@ -196,6 +196,55 @@ export const apnsTokens = pgTable(
   ]
 );
 
+// 1-on-1 DM conversations. Participants stored in canonical order (smaller UUID
+// as participantA) so we can enforce a single conversation per pair via UNIQUE.
+// Mutual-friend gate is enforced at the route layer, not the schema.
+export const conversations = pgTable(
+  "conversations",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    participantA: uuid("participant_a").notNull().references(() => users.id, { onDelete: "cascade" }),
+    participantB: uuid("participant_b").notNull().references(() => users.id, { onDelete: "cascade" }),
+    lastMessageAt: timestamp("last_message_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("conversations_pair_idx").on(table.participantA, table.participantB),
+    index("conversations_a_idx").on(table.participantA, table.lastMessageAt),
+    index("conversations_b_idx").on(table.participantB, table.lastMessageAt),
+  ]
+);
+
+export const messages = pgTable(
+  "messages",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    conversationId: uuid("conversation_id").notNull().references(() => conversations.id, { onDelete: "cascade" }),
+    senderId: uuid("sender_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    ciphertext: text("ciphertext").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    readAt: timestamp("read_at"), // when the (1-on-1) recipient read it
+  },
+  (table) => [
+    index("messages_convo_idx").on(table.conversationId, table.createdAt),
+  ]
+);
+
+// Sealed content keys per message, one row per recipient who can decrypt
+// (sender + receiver both get one). Same envelope pattern as comment_envelopes.
+export const messageEnvelopes = pgTable(
+  "message_envelopes",
+  {
+    messageId: uuid("message_id").notNull().references(() => messages.id, { onDelete: "cascade" }),
+    recipientId: uuid("recipient_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    sealedKey: text("sealed_key").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.messageId, table.recipientId] }),
+    index("message_envelopes_recipient_idx").on(table.recipientId),
+  ]
+);
+
 // Recipient-centric activity log: one row per "thing that happened to you".
 // Written from reaction/comment/follow paths alongside push dispatch, so the
 // in-app bell can hydrate from a single table with cheap pagination.
