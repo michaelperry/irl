@@ -189,7 +189,16 @@ struct EarthView: UIViewRepresentable {
         let minutes = Double(components.minute ?? 0)
         let fractionalHour = hours + minutes / 60.0
 
-        let sunAzimuth = (fractionalHour - 12.0) * 15.0 * .pi / 180.0
+        // Sun is over the longitude where it's currently solar noon. UTC noon = 0°,
+        // and the sun's apparent longitude moves -15°/hour (westward) as time advances.
+        let solarNoonLongitudeDeg = (12.0 - fractionalHour) * 15.0
+        let solarNoonLongitudeRad = solarNoonLongitudeDeg * .pi / 180.0
+
+        // The earth model is rotated by `currentEarthRotation()` to put the user's
+        // longitude at +Z. The sun's world-space angle is the same earth-rotation
+        // baseline plus the solar-noon longitude — without this term the sun illuminates
+        // the wrong hemisphere relative to the rotated earth.
+        let sunAzimuth = currentEarthRotation() + solarNoonLongitudeRad
 
         let dayOfYear = Double(calendar.ordinality(of: .day, in: .year, for: now) ?? 172)
         let declination = 23.4 * sin((360.0 / 365.0) * (dayOfYear - 81) * .pi / 180.0)

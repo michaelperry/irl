@@ -146,18 +146,11 @@ struct FeedView: View {
     @State private var storyGroups: [StoryGroup] = []
     @State private var viewerGroupIndex: Int?
     @State private var showStoryComposer = false
-    @State private var chromeMode: ChromeMode = .full
-    @State private var scrollOffset: CGFloat = 0
     @FocusState private var searchFocused: Bool
-
-    enum ChromeMode { case full, compact }
 
     var body: some View {
         NavigationStack {
-            ZStack(alignment: .top) {
-                feedScrollView
-                feedChromeOverlay
-            }
+            feedScrollView
             .background(IRLColors.deepSpace.ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
             .onChange(of: searchText) { _, newValue in
@@ -411,43 +404,38 @@ struct FeedView: View {
 
     // MARK: - Level 3 Glass Chrome
 
-    /// The scroll content. Tracks vertical offset via a transparent GeometryReader
-    /// pinned to the top so we can drive chrome compaction.
+    /// The full feed content. Chrome (globe + right pill) is the first row inside the
+    /// scroll view so it scrolls away naturally with content. No frozen overlay.
     private var feedScrollView: some View {
         ScrollView(showsIndicators: false) {
-            GeometryReader { geo in
-                Color.clear
-                    .preference(key: ScrollOffsetKey.self,
-                                value: -geo.frame(in: .named("feed")).minY)
-            }
-            .frame(height: 0)
+            VStack(spacing: 12) {
+                chromeRow
+                    .padding(.horizontal, 12)
+                    .padding(.top, 6)
 
-            // Top spacer that clears the chrome overlay at rest.
-            Color.clear.frame(height: chromeContentInset)
+                StoryRingsBar(
+                    groups: storyGroups,
+                    onTapGroup: { group in
+                        if let i = storyGroups.firstIndex(where: { $0.authorId == group.authorId }) {
+                            viewerGroupIndex = i
+                        }
+                    },
+                    onTapAddOwn: { openFirstStoryGroup() }
+                )
 
-            if !searchText.isEmpty {
-                searchPlaceholder
-            } else if filteredPosts.isEmpty {
-                emptyStateForFilter
-            } else {
-                LazyVStack(spacing: 0) {
-                    ForEach(filteredPosts) { post in
-                        FeedPostCard(post: post, postStore: postStore, onWhyTapped: {
-                            selectedWhyPost = post
-                            showWhySheet = true
-                        })
+                if !searchText.isEmpty {
+                    searchPlaceholder
+                } else if filteredPosts.isEmpty {
+                    emptyStateForFilter
+                } else {
+                    LazyVStack(spacing: 0) {
+                        ForEach(filteredPosts) { post in
+                            FeedPostCard(post: post, postStore: postStore, onWhyTapped: {
+                                selectedWhyPost = post
+                                showWhySheet = true
+                            })
+                        }
                     }
-                }
-            }
-        }
-        .coordinateSpace(name: "feed")
-        .onPreferenceChange(ScrollOffsetKey.self) { offset in
-            scrollOffset = offset
-            let isCompact = offset > 80
-            let target: ChromeMode = isCompact ? .compact : .full
-            if target != chromeMode {
-                withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
-                    chromeMode = target
                 }
             }
         }
@@ -458,112 +446,85 @@ struct FeedView: View {
         }
     }
 
-    /// Inset under the chrome at full mode (so first post starts below the chrome).
-    private var chromeContentInset: CGFloat {
-        chromeMode == .compact ? 60 : 188
-    }
-
-    /// Two-pill chrome overlay: globe pill (left) + unified search/actions/rings pill (right).
-    private var feedChromeOverlay: some View {
-        HStack(alignment: .top, spacing: 10) {
+    /// Globe pill + right pill, perfectly inline at the same pixel height.
+    private var chromeRow: some View {
+        HStack(spacing: 10) {
             globePill
-            rightChromePill
+            rightPill
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 6)
+        .frame(height: chromeRowHeight)
     }
 
+    private let chromeRowHeight: CGFloat = 48
+
+    /// Globe is the entry to "what's happening in the world today" — opens the
+    /// first available story group (or the composer when there are no groups yet).
     private var globePill: some View {
-        Button { showWorldMap = true } label: {
+        Button {
+            openFirstStoryGroup()
+        } label: {
             EarthView(autoRotate: true)
-                .frame(width: 44, height: 44)
+                .frame(width: chromeRowHeight - 8, height: chromeRowHeight - 8)
                 .clipShape(Circle())
                 .padding(4)
+                .frame(width: chromeRowHeight, height: chromeRowHeight)
         }
         .buttonStyle(.plain)
         .irlGlassPill(shape: Circle())
     }
 
-    /// Unified pill: search field + actions on row 1, story rings on row 2.
-    /// Wrapped in a GlassEffectContainer on iOS 26+ so the children blend.
+    /// Single-row pill: search field + actions trio at the same height as the globe.
     @ViewBuilder
-    private var rightChromePill: some View {
+    private var rightPill: some View {
+        let inner = searchAndActionsRow
+            .frame(height: chromeRowHeight)
         if #available(iOS 26.0, *) {
-            GlassEffectContainer(spacing: 4) {
-                rightChromeStack
-            }
+            inner.glassEffect(.regular, in: Capsule())
         } else {
-            rightChromeStack
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 26, style: .continuous)
-                        .stroke(.white.opacity(0.08), lineWidth: 0.5)
-                )
-        }
-    }
-
-    private var rightChromeStack: some View {
-        VStack(spacing: 0) {
-            searchAndActionsRow
-            if chromeMode == .full {
-                StoryRingsBar(
-                    groups: storyGroups,
-                    onTapGroup: { group in
-                        if let i = storyGroups.firstIndex(where: { $0.authorId == group.authorId }) {
-                            viewerGroupIndex = i
-                        }
-                    },
-                    onTapAddOwn: { showStoryComposer = true }
-                )
-                .frame(maxWidth: .infinity)
-                .transition(.asymmetric(
-                    insertion: .opacity.combined(with: .move(edge: .top)),
-                    removal: .opacity.combined(with: .move(edge: .top))
-                ))
-            }
+            inner
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay(Capsule().stroke(.white.opacity(0.08), lineWidth: 0.5))
         }
     }
 
     private var searchAndActionsRow: some View {
         HStack(spacing: 8) {
-            // Search — full text field at rest, magnifier-only when compact.
-            if chromeMode == .full {
-                HStack(spacing: 6) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.55))
-                    TextField("Search", text: $searchText)
-                        .focused($searchFocused)
-                        .font(.system(size: 14, design: .rounded))
-                        .foregroundStyle(IRLColors.primaryText)
-                        .submitLabel(.search)
-                }
-                .padding(.horizontal, 10)
-                .frame(height: 32)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-            } else {
-                Button {
-                    withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
-                        chromeMode = .full
-                    }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                        searchFocused = true
-                    }
-                } label: {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(IRLColors.primaryText)
-                        .frame(width: 36, height: 32)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.55))
+                TextField("Search", text: $searchText)
+                    .focused($searchFocused)
+                    .font(.system(size: 14, design: .rounded))
+                    .foregroundStyle(IRLColors.primaryText)
+                    .submitLabel(.search)
             }
+            .padding(.leading, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
 
             actionsTrio
+                .padding(.trailing, 4)
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 4)
+    }
+
+    /// Tap-globe behavior: open StoryViewer at the first interesting group; if you
+    /// have no groups visible, drop straight into the composer.
+    private func openFirstStoryGroup() {
+        if storyGroups.isEmpty {
+            showStoryComposer = true
+            return
+        }
+        if let me = KeychainService.userId,
+           let mineIdx = storyGroups.firstIndex(where: { $0.authorId == me }) {
+            viewerGroupIndex = mineIdx
+            return
+        }
+        if let unseenIdx = storyGroups.firstIndex(where: { $0.hasUnseen }) {
+            viewerGroupIndex = unseenIdx
+            return
+        }
+        viewerGroupIndex = 0
     }
 
     private var actionsTrio: some View {
@@ -1725,15 +1686,6 @@ private struct VideoPlayerRepresentable: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
-}
-
-// MARK: - Scroll Offset
-
-private struct ScrollOffsetKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
 }
 
 // MARK: - Glass Pill
