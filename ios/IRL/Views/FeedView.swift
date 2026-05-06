@@ -178,7 +178,9 @@ struct FeedView: View {
                 }
             }
             .refreshable {
-                try? await Task.sleep(for: .milliseconds(400))
+                await postStore.syncFromServer()
+                await refreshStories()
+                await refreshUnread()
             }
             .background(IRLColors.deepSpace.ignoresSafeArea())
             .searchable(text: $searchText, prompt: "Search people, interests, or places...")
@@ -309,7 +311,11 @@ struct FeedView: View {
             }
             .toolbarBackground(IRLColors.deepSpace, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
-            .task { await refreshUnread(); await refreshStories() }
+            .task {
+                await refreshUnread()
+                await refreshStories()
+                await postStore.syncFromServer()
+            }
             .refreshable { await refreshStories() }
             .onChange(of: showActivity) { _, isOpen in
                 if !isOpen { Task { await refreshUnread() } }
@@ -371,13 +377,14 @@ struct FeedView: View {
     // MARK: - Filter
 
     private var filteredPosts: [Post] {
+        // The server feed already restricts to people you follow + your own posts,
+        // so "friends" effectively means everything we have. "interests" is a
+        // future surface (algorithmic / topic-based) — empty for now.
         switch feedFilter {
-        case .friends:
-            return postStore.posts.filter { $0.authorId == "me" || $0.authorId == "friend" }
+        case .friends, .both:
+            return postStore.allFeedPosts
         case .interests:
-            return postStore.posts.filter { $0.authorId != "me" && $0.authorId != "friend" }
-        case .both:
-            return postStore.posts
+            return []
         }
     }
 
@@ -661,12 +668,16 @@ private struct FeedPostCard: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
 
-            // Media — edge to edge, tappable for detail
-            mediaContent
-                .onTapGesture { showPostDetail = true }
-                .fullScreenCover(isPresented: $showPostDetail) {
-                    FeedPostDetailView(post: post, postStore: postStore)
-                }
+            // Media — edge to edge, tappable for detail.
+            // Using a Button (not .onTapGesture) gives proper LazyVStack hit-testing
+            // and avoids inter-row gesture bleed onto the action row below.
+            Button { showPostDetail = true } label: {
+                mediaContent
+            }
+            .buttonStyle(.plain)
+            .fullScreenCover(isPresented: $showPostDetail) {
+                FeedPostDetailView(post: post, postStore: postStore)
+            }
 
             // Actions + Caption
             VStack(alignment: .leading, spacing: 8) {
@@ -1121,7 +1132,7 @@ private struct VideoThumbnailView: View {
     @State private var showFullscreenPlayer = false
 
     var body: some View {
-        ZStack {
+        Button { showFullscreenPlayer = true } label: {
             thumbnailImage
                 .overlay {
                     Circle()
@@ -1134,8 +1145,8 @@ private struct VideoThumbnailView: View {
                                 .offset(x: 2)
                         }
                 }
-                .onTapGesture { showFullscreenPlayer = true }
         }
+        .buttonStyle(.plain)
         .fullScreenCover(isPresented: $showFullscreenPlayer) {
             // AVPlayerViewController already provides a close button + AirPlay
             // controls; the prior custom xmark overlay duplicated the close.

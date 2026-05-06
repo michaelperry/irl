@@ -115,8 +115,17 @@ posts.get("/feed", async (c) => {
   }
 
   const feedPosts = await db
-    .select()
+    .select({
+      id: schema.posts.id,
+      userId: schema.posts.userId,
+      authorDisplayName: schema.users.displayNameHash,
+      encryptedContent: schema.posts.encryptedContent,
+      encryptedMediaUrl: schema.posts.encryptedMediaUrl,
+      encryptedMediaKey: schema.posts.encryptedMediaKey,
+      createdAt: schema.posts.createdAt,
+    })
     .from(schema.posts)
+    .innerJoin(schema.users, eq(schema.users.id, schema.posts.userId))
     .where(
       and(
         inArray(schema.posts.userId, visibleIds),

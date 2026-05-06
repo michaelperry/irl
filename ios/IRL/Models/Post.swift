@@ -76,6 +76,7 @@ struct Post: Identifiable, Codable {
         mediaFilename: String,
         thumbnailFilename: String? = nil,
         caption: String? = nil,
+        createdAt: Date = Date(),
         aspectRatio: Double = 1.0,
         location: PostLocation? = nil,
         trustLevel: TrustLevel = .verified
@@ -88,7 +89,7 @@ struct Post: Identifiable, Codable {
         self.mediaFilename = mediaFilename
         self.thumbnailFilename = thumbnailFilename
         self.caption = caption
-        self.createdAt = Date()
+        self.createdAt = createdAt
         self.aspectRatio = aspectRatio
         self.location = location
         self.trustLevel = trustLevel

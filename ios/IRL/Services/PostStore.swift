@@ -7,10 +7,26 @@ import UIKit
 
 final class PostStore: ObservableObject {
 
+    /// All locally-captured posts (yours), source of truth for what you've taken on this device.
     @Published private(set) var posts: [Post] = []
+
+    /// Subset of `posts` filtered to your own (currently equivalent — kept as a stable
+    /// reference for ProfileView).
     @Published private(set) var myPosts: [Post] = []
 
+    /// Posts fetched from `/posts/feed` — content from people you follow. Decoded into
+    /// the local `Post` model with media materialized to disk.
+    @Published private(set) var feedPosts: [Post] = []
+
     private let postsKey = "irl_posts"
+    private let feedPostsKey = "irl_feed_posts"
+
+    /// Posts shown in the feed: own + server-fetched, deduped by serverId, newest first.
+    var allFeedPosts: [Post] {
+        let myServerIds = Set(posts.compactMap { $0.serverId })
+        let dedupedFeed = feedPosts.filter { ($0.serverId.map { !myServerIds.contains($0) }) ?? true }
+        return (posts + dedupedFeed).sorted { $0.createdAt > $1.createdAt }
+    }
 
     init() {
         load()
@@ -195,25 +211,34 @@ final class PostStore: ObservableObject {
         if let data = try? JSONEncoder().encode(posts) {
             UserDefaults.standard.set(data, forKey: postsKey)
         }
+        if let data = try? JSONEncoder().encode(feedPosts) {
+            UserDefaults.standard.set(data, forKey: feedPostsKey)
+        }
     }
 
     private func load() {
-        guard let data = UserDefaults.standard.data(forKey: postsKey),
-              let decoded = try? JSONDecoder().decode([Post].self, from: data) else { return }
-        // Fuzz any existing precise locations to city level
-        posts = decoded.map { post in
-            guard let loc = post.location else { return post }
-            let fuzzed = PostLocation.fuzzy(latitude: loc.latitude, longitude: loc.longitude)
-            if fuzzed.latitude == loc.latitude && fuzzed.longitude == loc.longitude { return post }
-            return Post(
-                serverId: post.serverId,
-                authorId: post.authorId, authorName: post.authorName,
-                mediaType: post.mediaType, mediaFilename: post.mediaFilename,
-                thumbnailFilename: post.thumbnailFilename, caption: post.caption,
-                aspectRatio: post.aspectRatio, location: fuzzed, trustLevel: post.trustLevel
-            )
+        if let data = UserDefaults.standard.data(forKey: postsKey),
+           let decoded = try? JSONDecoder().decode([Post].self, from: data) {
+            // Fuzz any existing precise locations to city level
+            posts = decoded.map { post in
+                guard let loc = post.location else { return post }
+                let fuzzed = PostLocation.fuzzy(latitude: loc.latitude, longitude: loc.longitude)
+                if fuzzed.latitude == loc.latitude && fuzzed.longitude == loc.longitude { return post }
+                return Post(
+                    serverId: post.serverId,
+                    authorId: post.authorId, authorName: post.authorName,
+                    mediaType: post.mediaType, mediaFilename: post.mediaFilename,
+                    thumbnailFilename: post.thumbnailFilename, caption: post.caption,
+                    createdAt: post.createdAt, aspectRatio: post.aspectRatio,
+                    location: fuzzed, trustLevel: post.trustLevel
+                )
+            }
+            myPosts = posts.filter { $0.authorId == "me" }
         }
-        myPosts = posts.filter { $0.authorId == "me" }
+        if let data = UserDefaults.standard.data(forKey: feedPostsKey),
+           let decoded = try? JSONDecoder().decode([Post].self, from: data) {
+            feedPosts = decoded
+        }
         persist() // Save fuzzed versions
     }
 
@@ -261,16 +286,92 @@ final class PostStore: ObservableObject {
         persist()
     }
 
-    /// Fetch posts from server and merge with local
+    /// Fetch posts from server and decode them into local Post objects, materializing
+    /// media to disk so the existing rendering pipeline (loadImage / video URL) works
+    /// without changes. Replaces feedPosts wholesale with the latest 50.
     func syncFromServer() async {
         guard KeychainService.isLoggedIn else { return }
 
         do {
             let feed = try await APIClient.shared.getFeed(limit: 50)
-            print("[IRL] Fetched \(feed.posts.count) posts from server")
-            // Server posts will be integrated when we build the full sync layer
+            var decoded: [Post] = []
+            for serverPost in feed.posts {
+                if let post = materialize(serverPost: serverPost) {
+                    decoded.append(post)
+                }
+            }
+            await MainActor.run {
+                feedPosts = decoded.sorted { $0.createdAt > $1.createdAt }
+                persist()
+            }
+            print("[IRL] Synced \(decoded.count) feed posts from server")
         } catch {
             print("[IRL] Feed sync failed: \(error.localizedDescription)")
         }
+    }
+
+    /// Decode a `ServerPost` into a local `Post`, writing the base64 media payload to
+    /// disk under a deterministic `server_<serverId>.{jpg,mov}` filename so we don't
+    /// re-write the same file on every sync.
+    private func materialize(serverPost: APIClient.ServerPost) -> Post? {
+        // Parse the encryptedContent JSON (caption / mediaType / aspectRatio / location / trust)
+        guard let json = serverPost.encryptedContent,
+              let jsonData = json.data(using: .utf8),
+              let dict = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] else {
+            return nil
+        }
+
+        let caption = (dict["caption"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        let mediaTypeStr = (dict["mediaType"] as? String) ?? "photo"
+        let mediaType: MediaType = (mediaTypeStr == "video") ? .video : .photo
+        let aspectRatio = (dict["aspectRatio"] as? Double) ?? 1.0
+        let trustLevelStr = (dict["trustLevel"] as? String) ?? "verified"
+        let trustLevel = TrustLevel(rawValue: trustLevelStr) ?? .verified
+
+        let location: PostLocation? = {
+            if let locDict = dict["location"] as? [String: Any],
+               let lat = locDict["lat"] as? Double,
+               let lon = locDict["lon"] as? Double {
+                return PostLocation.fuzzy(latitude: lat, longitude: lon)
+            }
+            return nil
+        }()
+
+        // Materialize media to disk if not already present.
+        let ext = mediaType == .video ? "mov" : "jpg"
+        let filename = "server_\(serverPost.id).\(ext)"
+        let url = Self.mediaURL(for: filename)
+
+        if !FileManager.default.fileExists(atPath: url.path),
+           let mediaB64 = serverPost.encryptedMediaUrl,
+           let mediaData = Data(base64Encoded: mediaB64) {
+            try? mediaData.write(to: url, options: .atomic)
+        }
+
+        // Parse server createdAt (ISO-8601 with fractional seconds)
+        let createdAt = parseServerDate(serverPost.createdAt) ?? Date()
+
+        return Post(
+            serverId: serverPost.id,
+            authorId: serverPost.userId,
+            authorName: serverPost.authorDisplayName ?? "Friend",
+            mediaType: mediaType,
+            mediaFilename: filename,
+            thumbnailFilename: nil,
+            caption: caption,
+            createdAt: createdAt,
+            aspectRatio: aspectRatio,
+            location: location,
+            trustLevel: trustLevel
+        )
+    }
+
+    private func parseServerDate(_ s: String) -> Date? {
+        let withFractional = ISO8601DateFormatter()
+        withFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = withFractional.date(from: s) { return d }
+        let plain = ISO8601DateFormatter()
+        plain.formatOptions = [.withInternetDateTime]
+        return plain.date(from: s)
     }
 }

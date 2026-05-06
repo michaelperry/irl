@@ -70,6 +70,8 @@ final class APIClient {
     struct ServerPost: Codable {
         let id: String
         let userId: String
+        /// Present on /posts/feed; nil on /posts (create response).
+        let authorDisplayName: String?
         let encryptedContent: String?
         let encryptedMediaUrl: String?
         let encryptedMediaKey: String?
