@@ -1,62 +1,247 @@
 import SwiftUI
 import UIKit
+import UserNotifications
+import CoreLocation
 
 struct OnboardingView: View {
     var onComplete: () -> Void
 
     @State private var step: Int = 0
-    private let totalSteps = 5
+    @State private var hasMintedInvites = false
+    @State private var sharePayload: String?
+    @State private var presentShare = false
+    @State private var inviteRedeemedCount: Int = 0
 
-    /// Onboarding is a brand hero — always dark, regardless of system or app theme.
+    private let totalSteps = 4
+
+    /// IRL is "earth at night" — onboarding stays dark regardless of any global theme.
     private static let onboardingBackground = Color(red: 0.04, green: 0.05, blue: 0.10)
 
     var body: some View {
-        ZStack {
-            Self.onboardingBackground.ignoresSafeArea()
-
-            // Step content
-            Group {
-                switch step {
-                case 0: HeroStep()
-                case 1: PillarsStep()
-                case 2: VerifiedRealStep()
-                case 3: InviteStep(onSkip: advance, onSent: advance)
-                case 4: PermissionsStep(onDone: complete)
-                default: EmptyView()
-                }
+        GeometryReader { geo in
+            ZStack {
+                Self.onboardingBackground.ignoresSafeArea()
+                glowLayer
+                earthLayer(in: geo)
+                contentLayer
+                chromeLayer
             }
-            .transition(.asymmetric(
-                insertion: .opacity.combined(with: .move(edge: .trailing)),
-                removal: .opacity.combined(with: .move(edge: .leading))
-            ))
-            .id(step)
-
-            // Progress + nav
-            VStack {
-                StepDots(current: step, total: totalSteps)
-                    .padding(.top, 16)
-                Spacer()
-                if step < 3 {
-                    Button { advance() } label: {
-                        Text("Continue")
-                            .font(.system(size: 17, weight: .bold, design: .rounded))
-                            .foregroundStyle(.black)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 56)
-                            .background(.white)
-                            .clipShape(Capsule())
-                    }
-                    .padding(.horizontal, 32)
-                    .padding(.bottom, 36)
+            .environment(\.colorScheme, .dark)
+            .preferredColorScheme(.dark)
+            .sheet(isPresented: $presentShare, onDismiss: { presentShare = false }) {
+                if let payload = sharePayload {
+                    ShareActivityView(items: [payload])
                 }
             }
         }
-        .environment(\.colorScheme, .dark)
-        .preferredColorScheme(.dark)
     }
 
+    // MARK: - Background glow
+
+    private var glowLayer: some View {
+        Circle()
+            .fill(RadialGradient(
+                colors: [IRLColors.oceanBlue.opacity(0.32), .clear],
+                center: .center, startRadius: 60, endRadius: 320
+            ))
+            .frame(width: 520, height: 520)
+            .blur(radius: 30)
+            .offset(y: step == 0 ? 0 : -180)
+            .opacity(step == 0 ? 1 : 0.35)
+            .animation(.spring(response: 0.7, dampingFraction: 0.85), value: step)
+            .ignoresSafeArea()
+    }
+
+    // MARK: - Persistent earth
+
+    private func earthLayer(in geo: GeometryProxy) -> some View {
+        let size: CGFloat = step == 0 ? 240 : 130
+        let yOffset: CGFloat = step == 0 ? -geo.size.height * 0.10 : -geo.size.height * 0.32
+
+        return EarthView(autoRotate: true)
+            .frame(width: size, height: size)
+            .clipShape(Circle())
+            .overlay(Circle().stroke(IRLColors.earthGradient.opacity(0.25), lineWidth: 1.5))
+            .shadow(color: IRLColors.oceanBlue.opacity(0.3), radius: step == 0 ? 50 : 28)
+            .offset(y: yOffset)
+            .opacity(step == 0 ? 1.0 : 0.9)
+            .animation(.spring(response: 0.65, dampingFraction: 0.85), value: step)
+    }
+
+    // MARK: - Step content
+
+    private var contentLayer: some View {
+        Group {
+            switch step {
+            case 0: heroContent
+            case 1: pillarsContent
+            case 2: inviteContent
+            case 3: permissionsContent
+            default: EmptyView()
+            }
+        }
+        .transition(.asymmetric(
+            insertion: .opacity.combined(with: .offset(y: 12)),
+            removal: .opacity.combined(with: .offset(y: -12))
+        ))
+        .id(step)
+    }
+
+    // MARK: - Chrome (step dots + primary button)
+
+    private var chromeLayer: some View {
+        VStack {
+            StepDots(current: step, total: totalSteps)
+                .padding(.top, 20)
+            Spacer()
+            primaryButton
+                .padding(.horizontal, 32)
+                .padding(.bottom, 36)
+        }
+    }
+
+    @ViewBuilder
+    private var primaryButton: some View {
+        switch step {
+        case 0, 1:
+            ContinueButton(label: "Continue", action: advance)
+        case 2:
+            VStack(spacing: 10) {
+                ContinueButton(label: hasMintedInvites ? "Continue" : "Send Invites") {
+                    if hasMintedInvites {
+                        advance()
+                    } else {
+                        Task { await mintAndShare() }
+                    }
+                }
+                if !hasMintedInvites {
+                    Button("Skip for now", action: advance)
+                        .font(.system(size: 14, weight: .medium, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.55))
+                }
+            }
+        case 3:
+            ContinueButton(label: "Get Started", action: complete)
+        default:
+            EmptyView()
+        }
+    }
+
+    // MARK: - Step views
+
+    private var heroContent: some View {
+        VStack(spacing: 12) {
+            Spacer()
+            Spacer().frame(height: 100)
+            Text("A smaller internet.")
+                .font(.system(size: 32, weight: .black, design: .rounded))
+                .foregroundStyle(.white)
+                .multilineTextAlignment(.center)
+            Text("Made for the 50 people\nwho actually matter.")
+                .font(.system(size: 16, design: .rounded))
+                .foregroundStyle(.white.opacity(0.6))
+                .multilineTextAlignment(.center)
+                .lineSpacing(3)
+            Spacer()
+            Spacer().frame(height: 110) // leave room for chrome
+        }
+        .padding(.horizontal, 24)
+    }
+
+    private var pillarsContent: some View {
+        VStack(spacing: 0) {
+            Spacer().frame(height: 30)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Our promise.")
+                    .font(.system(size: 28, weight: .black, design: .rounded))
+                    .foregroundStyle(.white)
+                Text("Four things we'll never compromise on.")
+                    .font(.system(size: 13, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.5))
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 24)
+
+            VStack(spacing: 10) {
+                PillarCard(emoji: "🌍", title: "Real-life sized",
+                           text: "Capped at 50 friends. That's how many faces you actually know.")
+                PillarCard(emoji: "🛡", title: "No manipulation",
+                           text: "Chronological. No ads. No tracking. No algorithm picking what you see.")
+                PillarCard(emoji: "🔑", title: "Your data, your keys",
+                           text: "End-to-end encrypted. Your keys live on this device — we literally can't read your stuff.")
+                PillarCard(emoji: "✅", title: "Verified real",
+                           text: "No bots. No AI-generated content. We mark what's truly captured live.")
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 14)
+
+            Spacer()
+            Spacer().frame(height: 100)
+        }
+    }
+
+    private var inviteContent: some View {
+        VStack(spacing: 18) {
+            Spacer().frame(height: 30)
+            VStack(spacing: 8) {
+                Text("Invite 5. Unlock 5.")
+                    .font(.system(size: 28, weight: .black, design: .rounded))
+                    .foregroundStyle(.white)
+                Text("Bring 5 real-life friends. We'll unlock\n5 more spots in your circle.")
+                    .font(.system(size: 13, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.55))
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(2)
+            }
+            .padding(.horizontal, 24)
+
+            BonusSlotRow(redeemed: inviteRedeemedCount, total: 5)
+                .padding(.top, 8)
+
+            HStack(spacing: 6) {
+                Image(systemName: "person.2.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(0.55))
+                Text("Your circle: 0 of 50  ·  +5 bonus available")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.65))
+            }
+
+            Spacer()
+            Spacer().frame(height: 100)
+        }
+    }
+
+    private var permissionsContent: some View {
+        VStack(spacing: 14) {
+            Spacer().frame(height: 30)
+            VStack(spacing: 6) {
+                Text("One more thing.")
+                    .font(.system(size: 28, weight: .black, design: .rounded))
+                    .foregroundStyle(.white)
+                Text("Both optional. Both stay off until you turn them on.")
+                    .font(.system(size: 13, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.5))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 30)
+            }
+
+            VStack(spacing: 10) {
+                NotificationsPermissionCard()
+                LocationPermissionCard()
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 8)
+
+            Spacer()
+            Spacer().frame(height: 100)
+        }
+    }
+
+    // MARK: - Actions
+
     private func advance() {
-        withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
+        withAnimation(.spring(response: 0.5, dampingFraction: 0.85)) {
             step = min(step + 1, totalSteps - 1)
         }
     }
@@ -64,6 +249,30 @@ struct OnboardingView: View {
     private func complete() {
         UserDefaults.standard.set(true, forKey: "irl_onboarding_completed")
         onComplete()
+    }
+
+    private func mintAndShare() async {
+        do {
+            let minted = try await APIClient.shared.mintInvites(count: 5)
+            inviteRedeemedCount = minted.filter { $0.isRedeemed }.count
+            let codes = minted.filter { !$0.isRedeemed }.prefix(5).map { $0.code }
+            sharePayload = inviteShareText(codes: Array(codes))
+            hasMintedInvites = true
+            presentShare = true
+        } catch {
+            print("[IRL] mintInvites failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func inviteShareText(codes: [String]) -> String {
+        let codeList = codes.joined(separator: ", ")
+        return """
+        Come join me on IRL — a smaller, safer social network for real friends.
+
+        50 friends max, no ads, end-to-end encrypted. You hold the keys.
+
+        Use one of my invite codes when you sign up: \(codeList)
+        """
     }
 }
 
@@ -85,103 +294,26 @@ private struct StepDots: View {
     }
 }
 
-// MARK: - 1. Hero
+// MARK: - Buttons
 
-private struct HeroStep: View {
-    @State private var glow = false
+private struct ContinueButton: View {
+    let label: String
+    let action: () -> Void
 
     var body: some View {
-        VStack(spacing: 24) {
-            Spacer()
-
-            ZStack {
-                Circle()
-                    .fill(RadialGradient(
-                        colors: [IRLColors.oceanBlue.opacity(0.35), .clear],
-                        center: .center, startRadius: 50, endRadius: 200
-                    ))
-                    .frame(width: 360, height: 360)
-                    .blur(radius: 20)
-                    .scaleEffect(glow ? 1.05 : 1.0)
-
-                EarthView(autoRotate: true)
-                    .frame(width: 220, height: 220)
-                    .clipShape(Circle())
-                    .shadow(color: IRLColors.oceanBlue.opacity(0.3), radius: 40)
-            }
-            .onAppear {
-                withAnimation(.easeInOut(duration: 4).repeatForever(autoreverses: true)) {
-                    glow = true
-                }
-            }
-
-            Spacer().frame(height: 8)
-
-            VStack(spacing: 12) {
-                Text("A smaller internet.")
-                    .font(.system(size: 32, weight: .black, design: .rounded))
-                    .foregroundStyle(.white)
-                    .multilineTextAlignment(.center)
-
-                Text("Made for the 50 people\nwho actually matter.")
-                    .font(.system(size: 16, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.6))
-                    .multilineTextAlignment(.center)
-                    .lineSpacing(3)
-            }
-            .padding(.horizontal, 24)
-
-            Spacer()
-            Spacer().frame(height: 80) // leave room for nav
+        Button(action: action) {
+            Text(label)
+                .font(.system(size: 17, weight: .bold, design: .rounded))
+                .foregroundStyle(.black)
+                .frame(maxWidth: .infinity)
+                .frame(height: 54)
+                .background(.white)
+                .clipShape(Capsule())
         }
     }
 }
 
-// MARK: - 2. Three Pillars
-
-private struct PillarsStep: View {
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Spacer().frame(height: 60)
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Our promise.")
-                    .font(.system(size: 30, weight: .black, design: .rounded))
-                    .foregroundStyle(.white)
-                Text("Three things we'll never compromise on.")
-                    .font(.system(size: 14, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.5))
-            }
-            .padding(.horizontal, 24)
-
-            Spacer().frame(height: 4)
-
-            VStack(spacing: 12) {
-                PillarCard(
-                    emoji: "🌍",
-                    title: "Real-life sized",
-                    text: "Capped at 50 friends. That's how many faces you actually know."
-                )
-                PillarCard(
-                    emoji: "🛡",
-                    title: "No manipulation",
-                    text: "Chronological. No ads. No tracking. No algorithm picking what you see."
-                )
-                PillarCard(
-                    emoji: "🔑",
-                    title: "Your data, your keys",
-                    text: "End-to-end encrypted. Your keys live on this device — we literally can't read your stuff."
-                )
-            }
-            .padding(.horizontal, 20)
-
-            Spacer()
-            Spacer().frame(height: 90)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
+// MARK: - Pillar card
 
 private struct PillarCard: View {
     let emoji: String
@@ -189,286 +321,127 @@ private struct PillarCard: View {
     let text: String
 
     var body: some View {
-        HStack(alignment: .top, spacing: 14) {
-            Text(emoji).font(.system(size: 28))
-                .frame(width: 48, height: 48)
+        HStack(alignment: .top, spacing: 12) {
+            Text(emoji).font(.system(size: 22))
+                .frame(width: 38, height: 38)
                 .background(.white.opacity(0.06))
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.system(size: 17, weight: .bold, design: .rounded))
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
                 Text(text)
-                    .font(.system(size: 13, design: .rounded))
+                    .font(.system(size: 12, design: .rounded))
                     .foregroundStyle(.white.opacity(0.6))
-                    .lineSpacing(2)
+                    .lineSpacing(1.5)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(14)
+        .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.white.opacity(0.04))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(.white.opacity(0.06), lineWidth: 1)
         )
     }
 }
 
-// MARK: - 3. Verified Real
+// MARK: - Bonus slot row (compact)
 
-private struct VerifiedRealStep: View {
-    var body: some View {
-        VStack(spacing: 28) {
-            Spacer().frame(height: 80)
+private struct BonusSlotRow: View {
+    let redeemed: Int
+    let total: Int
 
-            VStack(spacing: 8) {
-                Image(systemName: "checkmark.seal.fill")
-                    .font(.system(size: 48))
-                    .foregroundStyle(IRLColors.earthGreen)
-                Text("Verified Real")
-                    .font(.system(size: 30, weight: .black, design: .rounded))
-                    .foregroundStyle(.white)
-                Text("We don't lie about what's real.")
-                    .font(.system(size: 14, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.5))
-            }
-
-            VStack(spacing: 10) {
-                BadgeRow(icon: "checkmark.seal.fill", color: IRLColors.earthGreen,
-                         label: "Verified Real", note: "Captured in IRL's camera. We saw it happen.")
-                BadgeRow(icon: "photo.badge.checkmark", color: .yellow,
-                         label: "Camera Roll", note: "From your photos. EXIF data still intact.")
-                BadgeRow(icon: "exclamationmark.triangle.fill", color: .orange,
-                         label: "Unverified", note: "We can't prove this one's real.")
-            }
-            .padding(.horizontal, 20)
-
-            Spacer()
-            Spacer().frame(height: 90)
-        }
-    }
-}
-
-private struct BadgeRow: View {
-    let icon: String
-    let color: Color
-    let label: String
-    let note: String
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: icon).font(.system(size: 18)).foregroundStyle(color)
-                .frame(width: 36)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(label).font(.system(size: 15, weight: .bold, design: .rounded)).foregroundStyle(.white)
-                Text(note).font(.system(size: 12, design: .rounded)).foregroundStyle(.white.opacity(0.5))
-            }
-            Spacer()
-        }
-        .padding(12)
-        .background(.white.opacity(0.04))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-}
-
-// MARK: - 4. Invite
-
-private struct InviteStep: View {
-    var onSkip: () -> Void
-    var onSent: () -> Void
-
-    @State private var invites: [Invite] = []
-    @State private var loading = false
-    @State private var presentShare = false
-    @State private var shareItems: [Any] = []
-
-    var body: some View {
-        VStack(spacing: 20) {
-            Spacer().frame(height: 60)
-
-            VStack(spacing: 8) {
-                Text("Invite 5. Unlock 5.")
-                    .font(.system(size: 30, weight: .black, design: .rounded))
-                    .foregroundStyle(.white)
-                Text("Bring 5 real-life friends.\nWe'll unlock 5 more spots in your circle.")
-                    .font(.system(size: 14, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.55))
-                    .multilineTextAlignment(.center)
-                    .lineSpacing(2)
-            }
-
-            DotsGrid(filled: 0, total: 50, ghost: 5, redeemedBonus: redeemedCount)
-                .padding(.horizontal, 32)
-                .padding(.vertical, 8)
-
-            Spacer()
-
-            VStack(spacing: 10) {
-                Button {
-                    Task { await mintAndShare() }
-                } label: {
-                    HStack(spacing: 8) {
-                        if loading { ProgressView().tint(.black) }
-                        Text(loading ? "Loading…" : "Send Invites")
-                            .font(.system(size: 17, weight: .bold, design: .rounded))
-                    }
-                    .foregroundStyle(.black)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 56)
-                    .background(.white)
-                    .clipShape(Capsule())
-                }
-                .disabled(loading)
-
-                Button("Skip for now", action: onSkip)
-                    .font(.system(size: 14, weight: .medium, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.5))
-                    .padding(.top, 4)
-            }
-            .padding(.horizontal, 32)
-            .padding(.bottom, 36)
-        }
-        .task { await loadInvites() }
-        .sheet(isPresented: $presentShare) {
-            ActivityView(items: shareItems)
-        }
-    }
-
-    private var redeemedCount: Int {
-        invites.filter { $0.isRedeemed }.count
-    }
-
-    private func loadInvites() async {
-        do {
-            invites = try await APIClient.shared.listMyInvites()
-        } catch {
-            print("[IRL] listMyInvites failed: \(error.localizedDescription)")
-        }
-    }
-
-    private func mintAndShare() async {
-        loading = true
-        defer { loading = false }
-        do {
-            let minted = try await APIClient.shared.mintInvites(count: 5)
-            invites = minted
-            let codes = minted.filter { !$0.isRedeemed }.prefix(5).map { $0.code }
-            let body = inviteShareText(codes: Array(codes))
-            shareItems = [body]
-            onSent()
-            presentShare = true
-        } catch {
-            print("[IRL] mintInvites failed: \(error.localizedDescription)")
-        }
-    }
-
-    private func inviteShareText(codes: [String]) -> String {
-        let codeList = codes.joined(separator: ", ")
-        return """
-        Come join me on IRL — a smaller, safer social network for real friends.
-
-        50 friends max, no ads, end-to-end encrypted. You hold the keys.
-
-        Use one of my invite codes when you sign up: \(codeList)
-        """
-    }
-}
-
-private struct DotsGrid: View {
-    let filled: Int
-    let total: Int
-    let ghost: Int
-    let redeemedBonus: Int
-
-    var body: some View {
-        let columns = Array(repeating: GridItem(.flexible(), spacing: 6), count: 10)
-        LazyVGrid(columns: columns, spacing: 6) {
             ForEach(0..<total, id: \.self) { i in
-                Circle()
-                    .fill(i < filled ? IRLColors.oceanBlue : Color.white.opacity(0.12))
-                    .frame(width: 14, height: 14)
-            }
-            ForEach(0..<ghost, id: \.self) { i in
-                let unlocked = i < redeemedBonus
-                Circle()
-                    .fill(unlocked ? IRLColors.earthGreen : Color.clear)
-                    .frame(width: 14, height: 14)
-                    .overlay(
-                        Circle().stroke(IRLColors.earthGreen.opacity(unlocked ? 1 : 0.4), style: StrokeStyle(lineWidth: 1.5, dash: unlocked ? [] : [3]))
-                    )
+                let unlocked = i < redeemed
+                ZStack {
+                    Circle()
+                        .fill(unlocked ? IRLColors.earthGreen.opacity(0.22) : Color.clear)
+                        .frame(width: 36, height: 36)
+                    Circle()
+                        .strokeBorder(
+                            unlocked ? IRLColors.earthGreen : Color.white.opacity(0.35),
+                            style: StrokeStyle(lineWidth: 1.6, dash: unlocked ? [] : [3])
+                        )
+                        .frame(width: 36, height: 36)
+                    if unlocked {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(IRLColors.earthGreen)
+                    } else {
+                        Text("+1")
+                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.45))
+                    }
+                }
             }
         }
     }
 }
 
-private struct ActivityView: UIViewControllerRepresentable {
-    let items: [Any]
-    func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: items, applicationActivities: nil)
-    }
-    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
-}
+// MARK: - Permission cards (with post-grant "Allowed" state)
 
-// MARK: - 5. Permissions
-
-private struct PermissionsStep: View {
-    var onDone: () -> Void
-    @State private var requestingPush = false
+private struct NotificationsPermissionCard: View {
+    @State private var status: UNAuthorizationStatus = .notDetermined
+    @State private var working = false
 
     var body: some View {
-        VStack(spacing: 18) {
-            Spacer().frame(height: 60)
+        PermissionCard(
+            icon: "bell.badge.fill",
+            title: "Notifications",
+            text: "For comments and reactions from your circle. Nothing else — we promise.",
+            granted: status == .authorized || status == .provisional || status == .ephemeral,
+            denied: status == .denied,
+            working: working,
+            onAllow: { Task { await request() } }
+        )
+        .task { await refreshStatus() }
+    }
 
-            VStack(spacing: 8) {
-                Text("One more thing.")
-                    .font(.system(size: 30, weight: .black, design: .rounded))
-                    .foregroundStyle(.white)
-                Text("Two permissions, both optional.")
-                    .font(.system(size: 14, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.5))
+    private func refreshStatus() async {
+        let s = await UNUserNotificationCenter.current().notificationSettings()
+        await MainActor.run { status = s.authorizationStatus }
+    }
+
+    private func request() async {
+        working = true
+        defer { working = false }
+        await PushService.shared.requestAuthorizationAndRegister()
+        await refreshStatus()
+    }
+}
+
+private struct LocationPermissionCard: View {
+    @State private var status: CLAuthorizationStatus = .notDetermined
+
+    var body: some View {
+        PermissionCard(
+            icon: "mappin.circle.fill",
+            title: "Location",
+            text: "Only city-level. Only when you want a pin on the world map.",
+            granted: status == .authorizedWhenInUse || status == .authorizedAlways,
+            denied: status == .denied || status == .restricted,
+            working: false,
+            onAllow: {
+                LocationService.shared.requestPermission()
+                // Re-poll shortly — iOS doesn't push us a status change synchronously
+                Task {
+                    try? await Task.sleep(for: .seconds(1))
+                    await refreshStatus()
+                }
             }
+        )
+        .task { await refreshStatus() }
+    }
 
-            Spacer().frame(height: 12)
-
-            VStack(spacing: 10) {
-                PermissionCard(
-                    icon: "bell.badge.fill",
-                    title: "Notifications",
-                    text: "For comments and reactions from your circle. Nothing else — we promise.",
-                    cta: requestingPush ? "Asking…" : "Allow",
-                    action: {
-                        requestingPush = true
-                        Task {
-                            await PushService.shared.requestAuthorizationAndRegister()
-                            requestingPush = false
-                        }
-                    }
-                )
-                PermissionCard(
-                    icon: "mappin.circle.fill",
-                    title: "Location",
-                    text: "Only city-level. Only when you want a pin on the world map.",
-                    cta: "Allow",
-                    action: { LocationService.shared.requestPermission() }
-                )
-            }
-            .padding(.horizontal, 20)
-
-            Spacer()
-
-            Button { onDone() } label: {
-                Text("Get Started")
-                    .font(.system(size: 17, weight: .bold, design: .rounded))
-                    .foregroundStyle(.black)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 56)
-                    .background(.white)
-                    .clipShape(Capsule())
-            }
-            .padding(.horizontal, 32)
-            .padding(.bottom, 36)
-        }
+    private func refreshStatus() async {
+        let s = CLLocationManager().authorizationStatus
+        await MainActor.run { status = s }
     }
 }
 
@@ -476,40 +449,84 @@ private struct PermissionCard: View {
     let icon: String
     let title: String
     let text: String
-    let cta: String
-    let action: () -> Void
+    let granted: Bool
+    let denied: Bool
+    let working: Bool
+    let onAllow: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: icon)
-                .font(.system(size: 22))
-                .foregroundStyle(IRLColors.oceanBlue)
+                .font(.system(size: 20))
+                .foregroundStyle(granted ? IRLColors.earthGreen : IRLColors.oceanBlue)
                 .frame(width: 36, height: 36)
-                .background(IRLColors.oceanBlue.opacity(0.12))
+                .background((granted ? IRLColors.earthGreen : IRLColors.oceanBlue).opacity(0.12))
                 .clipShape(RoundedRectangle(cornerRadius: 10))
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(title)
                     .font(.system(size: 15, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
                 Text(text)
                     .font(.system(size: 12, design: .rounded))
                     .foregroundStyle(.white.opacity(0.55))
-                    .lineSpacing(2)
+                    .lineSpacing(1.5)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Spacer()
 
-            Button(cta, action: action)
-                .font(.system(size: 13, weight: .bold, design: .rounded))
-                .foregroundStyle(.black)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(.white)
-                .clipShape(Capsule())
+            statePill
         }
         .padding(12)
         .background(.white.opacity(0.04))
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
+
+    @ViewBuilder
+    private var statePill: some View {
+        if granted {
+            HStack(spacing: 4) {
+                Image(systemName: "checkmark").font(.system(size: 10, weight: .bold))
+                Text("Allowed").font(.system(size: 12, weight: .bold, design: .rounded))
+            }
+            .foregroundStyle(IRLColors.earthGreen)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(IRLColors.earthGreen.opacity(0.14))
+            .clipShape(Capsule())
+        } else if denied {
+            Text("In Settings")
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.5))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(.white.opacity(0.06))
+                .clipShape(Capsule())
+        } else {
+            Button(action: onAllow) {
+                HStack(spacing: 4) {
+                    if working { ProgressView().tint(.black).scaleEffect(0.7) }
+                    Text(working ? "Asking…" : "Allow")
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                }
+                .foregroundStyle(.black)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(.white)
+                .clipShape(Capsule())
+            }
+            .disabled(working)
+        }
+    }
+}
+
+// MARK: - Share sheet wrapper
+
+private struct ShareActivityView: UIViewControllerRepresentable {
+    let items: [Any]
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
