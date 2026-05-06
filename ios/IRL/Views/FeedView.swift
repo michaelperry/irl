@@ -520,23 +520,15 @@ struct FeedView: View {
         }
     }
 
-    /// Tap-globe behavior: open StoryViewer at the first interesting group; if you
-    /// have no groups visible, drop straight into the composer.
+    /// Tap-globe behavior: open the first unseen story group. If nothing's unseen
+    /// (or there are no groups at all), drop straight into the composer so the user
+    /// can add their own story.
     private func openFirstStoryGroup() {
-        if storyGroups.isEmpty {
-            showStoryComposer = true
-            return
-        }
-        if let me = KeychainService.userId,
-           let mineIdx = storyGroups.firstIndex(where: { $0.authorId == me }) {
-            viewerGroupIndex = mineIdx
-            return
-        }
         if let unseenIdx = storyGroups.firstIndex(where: { $0.hasUnseen }) {
             viewerGroupIndex = unseenIdx
             return
         }
-        viewerGroupIndex = 0
+        showStoryComposer = true
     }
 
     private var actionsTrio: some View {
