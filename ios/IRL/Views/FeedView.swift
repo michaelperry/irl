@@ -139,6 +139,8 @@ struct FeedView: View {
     @State private var searchInFlight = false
     @State private var searchError: String?
     @State private var searchTask: Task<Void, Never>?
+    @State private var unreadActivity: Int = 0
+    @State private var showActivity = false
 
     var body: some View {
         NavigationStack {
@@ -181,6 +183,26 @@ struct FeedView: View {
                             .font(.system(size: 22, weight: .black, design: .rounded))
                             .foregroundStyle(IRLColors.primaryText)
                             .tracking(2)
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showActivity = true } label: {
+                        ZStack(alignment: .topTrailing) {
+                            Image(systemName: "bell")
+                                .font(.system(size: 16))
+                                .foregroundStyle(IRLColors.primaryText)
+                                .frame(width: 32, height: 32)
+                            if unreadActivity > 0 {
+                                Text(unreadActivity > 99 ? "99+" : "\(unreadActivity)")
+                                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 4)
+                                    .padding(.vertical, 1)
+                                    .background(Color.red)
+                                    .clipShape(Capsule())
+                                    .offset(x: 4, y: -2)
+                            }
+                        }
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -247,6 +269,14 @@ struct FeedView: View {
             }
             .toolbarBackground(IRLColors.deepSpace, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
+            .task { await refreshUnread() }
+            .onChange(of: showActivity) { _, isOpen in
+                if !isOpen { Task { await refreshUnread() } }
+            }
+            .sheet(isPresented: $showActivity) {
+                ActivitySheet(onDismiss: { showActivity = false })
+                    .presentationDragIndicator(.visible)
+            }
             .fullScreenCover(isPresented: $showWorldMap) {
                 WorldMapView(posts: postStore.posts, postStore: postStore)
             }
@@ -443,6 +473,12 @@ struct FeedView: View {
             }
             .padding(.horizontal, 16)
             .padding(.top, 12)
+        }
+    }
+
+    private func refreshUnread() async {
+        if let count = try? await APIClient.shared.unreadActivityCount() {
+            await MainActor.run { unreadActivity = count }
         }
     }
 

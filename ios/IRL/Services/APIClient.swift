@@ -196,6 +196,33 @@ final class APIClient {
         return r.invites
     }
 
+    // MARK: - Activity
+
+    struct ActivityFeedResponse: Codable {
+        let activities: [Activity]
+        let hasMore: Bool
+        let nextCursor: String?
+    }
+
+    func getActivity(before: String? = nil, limit: Int = 30) async throws -> ActivityFeedResponse {
+        var path = "/activity?limit=\(limit)"
+        if let before, let encoded = before.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
+            path += "&before=\(encoded)"
+        }
+        return try await get(path: path, authenticated: true)
+    }
+
+    func unreadActivityCount() async throws -> Int {
+        struct R: Codable { let unread: Int }
+        let r: R = try await get(path: "/activity/unread-count", authenticated: true)
+        return r.unread
+    }
+
+    func markActivityRead() async throws {
+        struct R: Codable { let marked: Bool }
+        let _: R = try await post(path: "/activity/mark-read", body: [:], authenticated: true)
+    }
+
     func registerAPNsToken(token: String, deviceId: String, environment: String) async throws {
         struct R: Codable { let registered: Bool }
         let _: R = try await post(

@@ -196,6 +196,28 @@ export const apnsTokens = pgTable(
   ]
 );
 
+// Recipient-centric activity log: one row per "thing that happened to you".
+// Written from reaction/comment/follow paths alongside push dispatch, so the
+// in-app bell can hydrate from a single table with cheap pagination.
+export const activities = pgTable(
+  "activities",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    recipientId: uuid("recipient_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    actorId: uuid("actor_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(), // reaction|comment|follow
+    postId: uuid("post_id"),
+    commentId: uuid("comment_id"),
+    reactionKind: text("reaction_kind"),
+    readAt: timestamp("read_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("activities_recipient_idx").on(table.recipientId, table.createdAt),
+    index("activities_recipient_unread_idx").on(table.recipientId, table.readAt),
+  ]
+);
+
 export const moderationActions = pgTable("moderation_actions", {
   id: uuid("id").defaultRandom().primaryKey(),
   reportId: uuid("report_id").references(() => reports.id),

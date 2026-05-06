@@ -2,20 +2,37 @@ import { createDb, schema } from "../db/index.js";
 import { eq } from "drizzle-orm";
 
 /**
- * Push dispatch.
+ * Notification dispatch.
  *
- * Stub implementation for now — looks up tokens for the recipient and logs the intended
- * payload. To enable real delivery, set APNS_AUTH_KEY (the .p8 contents), APNS_KEY_ID,
- * APNS_TEAM_ID, and APNS_BUNDLE_ID, then replace `deliver()` with an actual HTTP/2 request
- * to api.push.apple.com (or use a library like `node-apn`).
+ * Writes an in-app activity row (so the bell + activity feed update) and best-effort
+ * sends an APNs push for the same event. APNs delivery is currently a stub — set
+ * APNS_AUTH_KEY (the .p8 contents) + APNS_KEY_ID + APNS_TEAM_ID + APNS_BUNDLE_ID to
+ * activate, then finish `deliver()` with an HTTP/2 request to api.push.apple.com.
  *
- * Pushes are best-effort: they should never block the originating mutation.
+ * Both legs are best-effort: failures are logged, never thrown to callers.
  */
 export type PushKind =
   | { type: "comment"; postId: string; commentId: string; actorId: string }
-  | { type: "reaction"; postId: string; actorId: string; kind: string };
+  | { type: "reaction"; postId: string; actorId: string; kind: string }
+  | { type: "follow"; actorId: string };
 
 export async function notifyUser(recipientId: string, payload: PushKind): Promise<void> {
+  // 1. Write the in-app activity row (source of truth for the bell)
+  try {
+    const db = createDb();
+    await db.insert(schema.activities).values({
+      recipientId,
+      actorId: payload.actorId,
+      kind: payload.type,
+      postId: payload.type === "comment" || payload.type === "reaction" ? payload.postId : null,
+      commentId: payload.type === "comment" ? payload.commentId : null,
+      reactionKind: payload.type === "reaction" ? payload.kind : null,
+    });
+  } catch (err) {
+    console.error("[notify] activity write failed", err);
+  }
+
+  // 2. Best-effort APNs delivery
   try {
     const db = createDb();
     const tokens = await db

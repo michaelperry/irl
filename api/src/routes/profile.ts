@@ -3,6 +3,7 @@ import { createDb, schema } from "../db/index.js";
 import { eq, and, ilike, ne, notInArray, sql } from "drizzle-orm";
 import { authMiddleware } from "../middleware/auth.js";
 import { screenTimeMiddleware } from "../middleware/screentime.js";
+import { notifyUser } from "../services/push.js";
 import type { AppVariables } from "../types.js";
 
 // Real-life-sized friend group. Keep tight; product premise is intimacy, not reach.
@@ -173,6 +174,11 @@ profile.post("/follow/:targetId", async (c) => {
     .insert(schema.follows)
     .values({ followerId: userId, followingId: targetId, encryptedSharedKey: encryptedSharedKey ?? null })
     .onConflictDoNothing();
+
+  // Best-effort in-app activity + push to the followed user.
+  if (!existing) {
+    void notifyUser(targetId, { type: "follow", actorId: userId });
+  }
 
   const meAfter = c.get("user");
   return c.json({ followed: true, friendLimit: friendLimitFor(meAfter.bonusSlotsUnlocked) });
