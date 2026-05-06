@@ -22,6 +22,8 @@ struct ProfileView: View {
     @State private var showSettings = false
     @State private var showInvite = false
     @State private var showWorldMap = false
+    @State private var profileMe: APIClient.ProfileResponse?
+    @State private var invites: [Invite] = []
     @AppStorage("irl_show_pins") private var showPinsOnGlobe = true
 
     private var postLocations: [PostLocation] {
@@ -37,26 +39,24 @@ struct ProfileView: View {
                     headerSection
                     statsRow
                         .padding(.top, 56)
+                    friendCircleSection
+                        .padding(.top, 16)
                     photoGrid
                         .padding(.top, 20)
                     signOutButton
                         .padding(.top, 32)
                     Spacer(minLength: 60)
                 }
+                .task { await loadCircle() }
+                .refreshable { await loadCircle() }
             }
             .background(IRLColors.deepSpace.ignoresSafeArea())
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { showSettings = true } label: {
                         Image(systemName: "gearshape.fill")
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundStyle(IRLColors.primaryText)
-                            .padding(10)
-                            .background(IRLColors.cardBackground, in: Circle())
-                            .overlay(
-                                Circle()
-                                    .stroke(IRLColors.primaryText.opacity(0.15), lineWidth: 1)
-                            )
+                            .font(.system(size: 15))
+                            .foregroundStyle(IRLColors.primaryText.opacity(0.7))
                     }
                 }
             }
@@ -69,8 +69,8 @@ struct ProfileView: View {
                 WorldMapView(posts: postStore.myPosts, postStore: postStore)
             }
             .sheet(isPresented: $showInvite) {
-                InviteFriendView()
-                    .presentationDetents([.medium])
+                InviteFriendView(onChange: { Task { await loadCircle() } })
+                    .presentationDetents([.large])
                     .presentationDragIndicator(.visible)
             }
             .sheet(isPresented: $showSettings) {
@@ -226,18 +226,22 @@ struct ProfileView: View {
             showInvite = true
         } label: {
             VStack(spacing: 4) {
-                HStack(spacing: 4) {
-                    Image(systemName: "person.badge.plus")
-                        .font(.system(size: 16))
-                        .foregroundStyle(IRLColors.oceanBlue)
-                }
-                Text("Invite")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundStyle(IRLColors.oceanBlue)
+                Text(friendsStatValue)
+                    .font(.system(size: 20, weight: .bold, design: .rounded))
+                    .foregroundStyle(IRLColors.primaryText)
+                Text("friends")
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity)
         }
         .buttonStyle(.plain)
+    }
+
+    private var friendsStatValue: String {
+        guard let me = profileMe else { return "—" }
+        let limit = me.friendLimit ?? 50
+        return "\(me.following)/\(limit)"
     }
 
     private var screenTimeStat: some View {
@@ -264,6 +268,110 @@ struct ProfileView: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
+    }
+
+    // MARK: - Friend Circle Section
+
+    private var friendCircleSection: some View {
+        Button {
+            showInvite = true
+        } label: {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Your circle")
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.5))
+                            .tracking(0.5)
+                        Text(circleHeadline)
+                            .font(.system(size: 18, weight: .bold, design: .rounded))
+                            .foregroundStyle(IRLColors.primaryText)
+                    }
+                    Spacer()
+                    if pendingInviteCount > 0 {
+                        pendingChip
+                    } else {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.3))
+                    }
+                }
+
+                CircleDotsRow(
+                    filled: profileMe?.following ?? 0,
+                    base: profileMe?.friendLimit.map { $0 - (profileMe?.bonusSlotsUnlocked ?? 0) } ?? 50,
+                    bonusUnlocked: profileMe?.bonusSlotsUnlocked ?? 0,
+                    bonusMax: profileMe?.bonusSlotsMax ?? 5
+                )
+
+                if let subtitle = circleSubtitle {
+                    Text(subtitle)
+                        .font(.system(size: 12, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.55))
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(.white.opacity(0.06), lineWidth: 0.5)
+            )
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 16)
+    }
+
+    private var circleHeadline: String {
+        guard let me = profileMe else { return "—" }
+        let bonus = me.bonusSlotsUnlocked ?? 0
+        if bonus > 0 {
+            return "\(me.following) of \(me.friendLimit ?? 50)  ·  +\(bonus) bonus"
+        }
+        return "\(me.following) of \(me.friendLimit ?? 50)"
+    }
+
+    private var circleSubtitle: String? {
+        guard let me = profileMe else { return nil }
+        let bonus = me.bonusSlotsUnlocked ?? 0
+        let maxBonus = me.bonusSlotsMax ?? 5
+        let redeemedThisRound = invites.filter { $0.isRedeemed }.count
+        if bonus < maxBonus {
+            let left = maxBonus - bonus
+            return "Invite \(left) more friend\(left == 1 ? "" : "s") to unlock \(left) bonus spot\(left == 1 ? "" : "s")."
+        }
+        if redeemedThisRound > 0 {
+            return "All bonus spots unlocked. Real-life sized, plus 5."
+        }
+        return nil
+    }
+
+    private var pendingInviteCount: Int {
+        invites.filter { !$0.isRedeemed }.count
+    }
+
+    private var pendingChip: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "envelope.badge").font(.system(size: 11))
+            Text("\(pendingInviteCount) pending")
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+        }
+        .foregroundStyle(IRLColors.oceanBlue)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(IRLColors.oceanBlue.opacity(0.12))
+        .clipShape(Capsule())
+    }
+
+    private func loadCircle() async {
+        async let me = try? APIClient.shared.getProfile()
+        async let inv = try? APIClient.shared.listMyInvites()
+        let (m, i) = await (me, inv)
+        await MainActor.run {
+            if let m { self.profileMe = m }
+            if let i { self.invites = i }
+        }
     }
 
     private var screenTimeColor: Color {
@@ -403,6 +511,75 @@ struct ProfileView: View {
                 .foregroundStyle(.red.opacity(0.7))
         }
         .padding(.top, 16)
+    }
+}
+
+// MARK: - Circle Dots Row
+
+private struct CircleDotsRow: View {
+    let filled: Int        // following count
+    let base: Int          // typically 50
+    let bonusUnlocked: Int // 0..bonusMax
+    let bonusMax: Int      // typically 5
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            // Base 50 — 10 cols x 5 rows
+            VStack(spacing: 4) {
+                ForEach(0..<rowCount, id: \.self) { row in
+                    HStack(spacing: 4) {
+                        ForEach(0..<perRow, id: \.self) { col in
+                            let idx = row * perRow + col
+                            dot(filledBaseIndex: idx)
+                        }
+                    }
+                }
+            }
+            // Bonus — 5 dots inline
+            HStack(spacing: 6) {
+                Text("BONUS")
+                    .font(.system(size: 9, weight: .heavy, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.35))
+                    .tracking(1.2)
+                HStack(spacing: 4) {
+                    ForEach(0..<bonusMax, id: \.self) { i in
+                        bonusDot(at: i)
+                    }
+                }
+            }
+            .padding(.top, 4)
+        }
+    }
+
+    private let perRow = 10
+    private var rowCount: Int { Int((Double(base) / Double(perRow)).rounded(.up)) }
+
+    @ViewBuilder
+    private func dot(filledBaseIndex idx: Int) -> some View {
+        if idx >= base {
+            Color.clear.frame(width: 8, height: 8)
+        } else if idx < min(filled, base) {
+            Circle().fill(IRLColors.oceanBlue).frame(width: 8, height: 8)
+        } else {
+            Circle().fill(.white.opacity(0.12)).frame(width: 8, height: 8)
+        }
+    }
+
+    @ViewBuilder
+    private func bonusDot(at i: Int) -> some View {
+        let unlocked = i < bonusUnlocked
+        let used = unlocked && (filled - base) > i
+        if used {
+            Circle().fill(IRLColors.earthGreen).frame(width: 8, height: 8)
+        } else if unlocked {
+            Circle()
+                .strokeBorder(IRLColors.earthGreen, lineWidth: 1.4)
+                .frame(width: 8, height: 8)
+        } else {
+            Circle()
+                .strokeBorder(.white.opacity(0.25), style: StrokeStyle(lineWidth: 1, dash: [2]))
+                .frame(width: 8, height: 8)
+        }
     }
 }
 
@@ -559,59 +736,173 @@ private struct PostDetailView: View {
 // MARK: - Invite Friend
 
 private struct InviteFriendView: View {
+    var onChange: (() -> Void)?
+
     @Environment(\.dismiss) private var dismiss
+    @State private var invites: [Invite] = []
+    @State private var loading = false
+    @State private var errorMessage: String?
+    @State private var presentShare = false
+    @State private var shareItems: [Any] = []
+    @State private var copiedCode: String?
 
     var body: some View {
-        VStack(spacing: 24) {
-            // Earth globe
-            EarthView(autoRotate: true)
-                .frame(width: 100, height: 100)
-                .clipShape(Circle())
-                .padding(.top, 24)
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    headerBlock
+                    codesList
+                    shareAllButton
+                    Spacer(minLength: 24)
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 8)
+            }
+            .background(IRLColors.deepSpace.ignoresSafeArea())
+            .navigationTitle("Invite friends")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Done") { dismiss() }
+                        .foregroundStyle(IRLColors.oceanBlue)
+                }
+            }
+            .toolbarBackground(IRLColors.deepSpace, for: .navigationBar)
+            .task { await loadOrMint() }
+            .sheet(isPresented: $presentShare) {
+                ShareActivityView(items: shareItems)
+            }
+            .alert("Couldn't load invites", isPresented: .constant(errorMessage != nil)) {
+                Button("OK") { errorMessage = nil }
+            } message: { Text(errorMessage ?? "") }
+        }
+    }
 
-            Text("Invite a friend to IRL")
-                .font(.system(size: 24, weight: .bold, design: .rounded))
+    private var headerBlock: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Bring your real-life friends.")
+                .font(.system(size: 24, weight: .black, design: .rounded))
                 .foregroundStyle(IRLColors.primaryText)
+            Text("Each friend who joins unlocks one bonus slot in your circle, up to 5.")
+                .font(.system(size: 14, design: .rounded))
+                .foregroundStyle(.white.opacity(0.55))
+        }
+    }
 
-            Text("IRL is better with real people. Share your invite and start building your world together.")
-                .font(.system(size: 15, design: .rounded))
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
-
-            // Share button
-            ShareLink(item: "Join me on IRL — the safest place on the internet. No ads, no bots, fully encrypted. Download here: https://irl.earth") {
-                HStack(spacing: 8) {
-                    Image(systemName: "square.and.arrow.up")
-                        .font(.system(size: 16))
-                    Text("Share Invite")
-                        .font(.system(size: 16, weight: .bold, design: .rounded))
+    private var codesList: some View {
+        VStack(spacing: 10) {
+            if loading && invites.isEmpty {
+                ProgressView().tint(.white).padding(.vertical, 36)
+            } else {
+                ForEach(invites) { inv in
+                    codeRow(inv)
                 }
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity)
-                .frame(height: 54)
-                .background(IRLColors.oceanBlue)
-                .clipShape(Capsule())
             }
-            .padding(.horizontal, 32)
+        }
+    }
 
-            // Copy link
-            Button {
-                UIPasteboard.general.string = "https://irl.earth/invite"
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "link")
-                        .font(.system(size: 14))
-                    Text("Copy invite link")
-                        .font(.system(size: 14, weight: .medium, design: .rounded))
-                }
-                .foregroundStyle(IRLColors.oceanBlue)
-            }
+    private func codeRow(_ inv: Invite) -> some View {
+        HStack(spacing: 12) {
+            Text(inv.code)
+                .font(.system(size: 17, weight: .bold, design: .monospaced))
+                .foregroundStyle(inv.isRedeemed ? .white.opacity(0.35) : IRLColors.primaryText)
+                .strikethrough(inv.isRedeemed, color: .white.opacity(0.35))
 
             Spacer()
+
+            if inv.isRedeemed {
+                Label("Redeemed", systemImage: "checkmark.seal.fill")
+                    .labelStyle(.titleAndIcon)
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(IRLColors.earthGreen)
+            } else {
+                Button {
+                    UIPasteboard.general.string = inv.code
+                    copiedCode = inv.code
+                    Task {
+                        try? await Task.sleep(for: .seconds(1.2))
+                        await MainActor.run {
+                            if copiedCode == inv.code { copiedCode = nil }
+                        }
+                    }
+                } label: {
+                    Label(
+                        copiedCode == inv.code ? "Copied" : "Copy",
+                        systemImage: copiedCode == inv.code ? "checkmark" : "doc.on.doc"
+                    )
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(IRLColors.oceanBlue)
+                }
+                .buttonStyle(.plain)
+            }
         }
-        .background(IRLColors.deepSpace.ignoresSafeArea())
+        .padding(14)
+        .background(.white.opacity(inv.isRedeemed ? 0.02 : 0.05))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(.white.opacity(0.06), lineWidth: 0.5)
+        )
     }
+
+    private var shareAllButton: some View {
+        let liveCodes = invites.filter { !$0.isRedeemed }.map { $0.code }
+        return Button {
+            let body = inviteShareText(codes: liveCodes)
+            shareItems = [body]
+            presentShare = true
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "square.and.arrow.up").font(.system(size: 16))
+                Text(liveCodes.isEmpty ? "All invites used 🎉" : "Share invites")
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
+            }
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity)
+            .frame(height: 52)
+            .background(liveCodes.isEmpty ? Color.white.opacity(0.1) : IRLColors.oceanBlue)
+            .clipShape(Capsule())
+        }
+        .disabled(liveCodes.isEmpty)
+    }
+
+    private func loadOrMint() async {
+        loading = true
+        defer { loading = false }
+        do {
+            // Returns existing live codes + tops up to 5 if needed; idempotent.
+            let minted = try await APIClient.shared.mintInvites(count: 5)
+            invites = minted
+            onChange?()
+        } catch {
+            // Fall back to listing only (no mint) if we hit a server hiccup
+            do {
+                invites = try await APIClient.shared.listMyInvites()
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func inviteShareText(codes: [String]) -> String {
+        guard !codes.isEmpty else { return "" }
+        let codeList = codes.joined(separator: ", ")
+        return """
+        Come join me on IRL — a smaller, safer social network for real friends.
+
+        50 friends max, no ads, end-to-end encrypted. You hold the keys.
+
+        Use one of my invite codes when you sign up: \(codeList)
+        """
+    }
+}
+
+private struct ShareActivityView: UIViewControllerRepresentable {
+    let items: [Any]
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
 #Preview {
