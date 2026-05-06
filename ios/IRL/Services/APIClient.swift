@@ -274,6 +274,54 @@ final class APIClient {
         let _: R = try await post(path: "/messages/\(conversationId)/mark-read", body: [:], authenticated: true)
     }
 
+    // MARK: - Stories
+
+    struct StoriesResponse: Codable {
+        let groups: [StoryGroup]
+    }
+
+    func getStoryGroups() async throws -> [StoryGroup] {
+        let r: StoriesResponse = try await get(path: "/stories", authenticated: true)
+        return r.groups
+    }
+
+    func getStoryAudience() async throws -> [AudienceRecipient] {
+        let r: AudienceResponse = try await get(path: "/stories/audience", authenticated: true)
+        return r.recipients
+    }
+
+    struct CreatedStoryResponse: Codable {
+        let story: Story
+    }
+
+    func createStory(
+        encryptedContent: String? = nil,
+        encryptedMediaUrl: String? = nil,
+        encryptedMediaKey: String? = nil,
+        trustLevel: String = "verified",
+        envelopes: [(recipientId: String, sealedKey: String)] = []
+    ) async throws -> Story {
+        var body: [String: Any] = ["trustLevel": trustLevel]
+        if let encryptedContent { body["encryptedContent"] = encryptedContent }
+        if let encryptedMediaUrl { body["encryptedMediaUrl"] = encryptedMediaUrl }
+        if let encryptedMediaKey { body["encryptedMediaKey"] = encryptedMediaKey }
+        if !envelopes.isEmpty {
+            body["envelopes"] = envelopes.map { ["recipientId": $0.recipientId, "sealedKey": $0.sealedKey] }
+        }
+        let r: CreatedStoryResponse = try await post(path: "/stories", body: body, authenticated: true)
+        return r.story
+    }
+
+    func markStoryViewed(_ storyId: String) async throws {
+        struct R: Codable { let viewed: Bool }
+        let _: R = try await post(path: "/stories/\(storyId)/view", body: [:], authenticated: true)
+    }
+
+    func deleteStory(_ storyId: String) async throws {
+        struct R: Codable { let deleted: Bool }
+        let _: R = try await delete(path: "/stories/\(storyId)", authenticated: true)
+    }
+
     func registerAPNsToken(token: String, deviceId: String, environment: String) async throws {
         struct R: Codable { let registered: Bool }
         let _: R = try await post(

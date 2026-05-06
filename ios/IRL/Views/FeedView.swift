@@ -143,21 +143,36 @@ struct FeedView: View {
     @State private var showActivity = false
     @State private var unreadMessages: Int = 0
     @State private var showMessages = false
+    @State private var storyGroups: [StoryGroup] = []
+    @State private var viewerGroupIndex: Int?
+    @State private var showStoryComposer = false
 
     var body: some View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
                 if !searchText.isEmpty {
                     searchPlaceholder
-                } else if filteredPosts.isEmpty {
-                    emptyStateForFilter
                 } else {
-                    LazyVStack(spacing: 0) {
-                        ForEach(filteredPosts) { post in
-                            FeedPostCard(post: post, postStore: postStore, onWhyTapped: {
-                                selectedWhyPost = post
-                                showWhySheet = true
-                            })
+                    StoryRingsBar(
+                        groups: storyGroups,
+                        onTapGroup: { group in
+                            if let i = storyGroups.firstIndex(where: { $0.authorId == group.authorId }) {
+                                viewerGroupIndex = i
+                            }
+                        },
+                        onTapAddOwn: { showStoryComposer = true }
+                    )
+
+                    if filteredPosts.isEmpty {
+                        emptyStateForFilter
+                    } else {
+                        LazyVStack(spacing: 0) {
+                            ForEach(filteredPosts) { post in
+                                FeedPostCard(post: post, postStore: postStore, onWhyTapped: {
+                                    selectedWhyPost = post
+                                    showWhySheet = true
+                                })
+                            }
                         }
                     }
                 }
@@ -291,7 +306,8 @@ struct FeedView: View {
             }
             .toolbarBackground(IRLColors.deepSpace, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
-            .task { await refreshUnread() }
+            .task { await refreshUnread(); await refreshStories() }
+            .refreshable { await refreshStories() }
             .onChange(of: showActivity) { _, isOpen in
                 if !isOpen { Task { await refreshUnread() } }
             }
@@ -305,6 +321,30 @@ struct FeedView: View {
             .sheet(isPresented: $showMessages) {
                 MessagesInboxSheet(onDismiss: { showMessages = false })
                     .presentationDragIndicator(.visible)
+            }
+            .sheet(isPresented: $showStoryComposer) {
+                StoryComposerSheet(onPublished: { Task { await refreshStories() } })
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+            }
+            .fullScreenCover(item: Binding(
+                get: { viewerGroupIndex.map { ViewerHandle(index: $0) } },
+                set: { viewerGroupIndex = $0?.index }
+            )) { handle in
+                if storyGroups.indices.contains(handle.index) {
+                    StoryViewer(
+                        group: storyGroups[handle.index],
+                        onClose: { viewerGroupIndex = nil },
+                        onAdvanceGroup: {
+                            let next = handle.index + 1
+                            viewerGroupIndex = next < storyGroups.count ? next : nil
+                        },
+                        onPreviousGroup: {
+                            let prev = handle.index - 1
+                            if prev >= 0 { viewerGroupIndex = prev } else { viewerGroupIndex = nil }
+                        }
+                    )
+                }
             }
             .fullScreenCover(isPresented: $showWorldMap) {
                 WorldMapView(posts: postStore.posts, postStore: postStore)
@@ -512,6 +552,12 @@ struct FeedView: View {
         await MainActor.run {
             if let a { unreadActivity = a }
             if let m { unreadMessages = m }
+        }
+    }
+
+    private func refreshStories() async {
+        if let groups = try? await APIClient.shared.getStoryGroups() {
+            await MainActor.run { storyGroups = groups }
         }
     }
 
@@ -1008,6 +1054,14 @@ private struct UserSearchRow: View {
             capError = error.localizedDescription
         }
     }
+}
+
+// MARK: - Viewer Handle
+
+/// Lets us drive a fullScreenCover off an Int? state.
+private struct ViewerHandle: Identifiable, Hashable {
+    let index: Int
+    var id: Int { index }
 }
 
 // MARK: - Flow Layout

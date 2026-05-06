@@ -50,6 +50,13 @@
       "when": 1778088409839,
       "tag": "0006_loose_the_initiative",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1778089079692,
+      "tag": "0007_steep_mandarin",
+      "breakpoints": true
     }
   ]
 }

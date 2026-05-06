@@ -212,6 +212,53 @@ export const apnsTokens = pgTable(
   ]
 );
 
+// Ephemeral stories — visible to the author's followers for 24h.
+// Same audience model as posts (author's followers); same E2E pattern as comments
+// (per-recipient sealed key envelope). expiresAt is set client-side or in the
+// route to createdAt + 24h.
+export const stories = pgTable(
+  "stories",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    encryptedContent: text("encrypted_content"),
+    encryptedMediaUrl: text("encrypted_media_url"),
+    encryptedMediaKey: text("encrypted_media_key"),
+    trustLevel: text("trust_level").notNull().default("verified"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+  },
+  (table) => [
+    index("stories_user_idx").on(table.userId, table.expiresAt),
+    index("stories_active_idx").on(table.expiresAt),
+  ]
+);
+
+export const storyEnvelopes = pgTable(
+  "story_envelopes",
+  {
+    storyId: uuid("story_id").notNull().references(() => stories.id, { onDelete: "cascade" }),
+    recipientId: uuid("recipient_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    sealedKey: text("sealed_key").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.storyId, table.recipientId] }),
+    index("story_envelopes_recipient_idx").on(table.recipientId),
+  ]
+);
+
+export const storyViews = pgTable(
+  "story_views",
+  {
+    storyId: uuid("story_id").notNull().references(() => stories.id, { onDelete: "cascade" }),
+    viewerId: uuid("viewer_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    viewedAt: timestamp("viewed_at").defaultNow().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.storyId, table.viewerId] }),
+  ]
+);
+
 // 1-on-1 DM conversations. Participants stored in canonical order (smaller UUID
 // as participantA) so we can enforce a single conversation per pair via UNIQUE.
 // Mutual-friend gate is enforced at the route layer, not the schema.
