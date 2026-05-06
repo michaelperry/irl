@@ -3,5 +3,11 @@
   "outputDirectory": "dist",
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api" }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/inactivity-nudge",
+      "schedule": "0 17 * * *"
+    }
   ]
 }

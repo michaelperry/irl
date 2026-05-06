@@ -20,6 +20,7 @@ export const users = pgTable("users", {
   bonusSlotsUnlocked: integer("bonus_slots_unlocked").notNull().default(0), // 0..5; +1 per successful invite, max 5
   strikeCount: integer("strike_count").notNull().default(0),
   suspendedUntil: timestamp("suspended_until"),
+  lastNudgeSentAt: timestamp("last_nudge_sent_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

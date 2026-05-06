@@ -25,6 +25,10 @@ struct Activity: Identifiable, Codable {
             return "\(actorName) commented on your post"
         case "follow":
             return "\(actorName) added you as a friend"
+        case "post":
+            return "\(actorName) just shared a moment"
+        case "message":
+            return "\(actorName) sent you a message"
         default:
             return "\(actorName) interacted"
         }
@@ -35,6 +39,8 @@ struct Activity: Identifiable, Codable {
         case "reaction": return "face.smiling.fill"
         case "comment":  return "bubble.left.fill"
         case "follow":   return "person.crop.circle.badge.plus"
+        case "post":     return "camera.fill"
+        case "message":  return "envelope.fill"
         default:         return "bell.fill"
         }
     }

@@ -3,6 +3,7 @@ import { createDb, schema } from "../db/index.js";
 import { and, eq, desc, inArray, isNull, isNotNull } from "drizzle-orm";
 import { authMiddleware } from "../middleware/auth.js";
 import { screenTimeMiddleware } from "../middleware/screentime.js";
+import { notifyUser } from "../services/push.js";
 import type { AppVariables } from "../types.js";
 
 const posts = new Hono<{ Variables: AppVariables }>();
@@ -69,6 +70,24 @@ posts.post("/", async (c) => {
       encryptedMediaKey,
     })
     .returning();
+
+  // Fan out a notification to each of the author's followers — they want to
+  // know when someone they're connected with shares. Best-effort, fire-and-forget;
+  // the friend cap (50 + 5) keeps this bounded.
+  void (async () => {
+    try {
+      const followers = await db
+        .select({ id: schema.follows.followerId })
+        .from(schema.follows)
+        .where(eq(schema.follows.followingId, userId));
+      for (const f of followers) {
+        if (f.id === userId) continue;
+        void notifyUser(f.id, { type: "post", postId: post.id, actorId: userId });
+      }
+    } catch (err) {
+      console.error("[posts] follower fan-out failed", err);
+    }
+  })();
 
   return c.json({ post }, 201);
 });

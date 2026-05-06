@@ -12,6 +12,7 @@ import invites from "./routes/invites.js";
 import activity from "./routes/activity.js";
 import messages from "./routes/messages.js";
 import stories from "./routes/stories.js";
+import cron from "./routes/cron.js";
 
 import type { AppVariables } from "./types.js";
 
@@ -38,5 +39,6 @@ app.route("/invites", invites);
 app.route("/activity", activity);
 app.route("/messages", messages);
 app.route("/stories", stories);
+app.route("/cron", cron);
 
 export default app;

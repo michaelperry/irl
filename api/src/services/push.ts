@@ -15,22 +15,30 @@ export type PushKind =
   | { type: "comment"; postId: string; commentId: string; actorId: string }
   | { type: "reaction"; postId: string; actorId: string; kind: string }
   | { type: "follow"; actorId: string }
-  | { type: "message"; conversationId: string; messageId: string; actorId: string };
+  | { type: "message"; conversationId: string; messageId: string; actorId: string }
+  | { type: "post"; postId: string; actorId: string }
+  | { type: "nudge"; actorId: string };
 
 export async function notifyUser(recipientId: string, payload: PushKind): Promise<void> {
-  // 1. Write the in-app activity row (source of truth for the bell)
-  try {
-    const db = createDb();
-    await db.insert(schema.activities).values({
-      recipientId,
-      actorId: payload.actorId,
-      kind: payload.type,
-      postId: payload.type === "comment" || payload.type === "reaction" ? payload.postId : null,
-      commentId: payload.type === "comment" ? payload.commentId : null,
-      reactionKind: payload.type === "reaction" ? payload.kind : null,
-    });
-  } catch (err) {
-    console.error("[notify] activity write failed", err);
+  // 1. Write the in-app activity row (source of truth for the bell). Skip for
+  //    nudge — those are gentle reminders, not social events worth surfacing in the feed.
+  if (payload.type !== "nudge") {
+    try {
+      const db = createDb();
+      await db.insert(schema.activities).values({
+        recipientId,
+        actorId: payload.actorId,
+        kind: payload.type,
+        postId:
+          payload.type === "comment" || payload.type === "reaction" || payload.type === "post"
+            ? payload.postId
+            : null,
+        commentId: payload.type === "comment" ? payload.commentId : null,
+        reactionKind: payload.type === "reaction" ? payload.kind : null,
+      });
+    } catch (err) {
+      console.error("[notify] activity write failed", err);
+    }
   }
 
   // 2. Best-effort APNs delivery
