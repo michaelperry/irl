@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Full-screen tap-through viewer for a single author's stories.
 struct StoryViewer: View {
@@ -93,37 +94,55 @@ struct StoryViewer: View {
     @ViewBuilder
     private var currentBody: some View {
         let s = group.stories[index]
-        // Decrypt envelope-protected text content if present
+        // Decrypt envelope-protected text content if present.
         let plain: String? = {
-            guard let env = s.myEnvelope, let cipher = s.encryptedContent else { return s.encryptedContent }
-            if let key = try? CryptoService.openSealedKey(env),
+            guard let cipher = s.encryptedContent else { return nil }
+            if let env = s.myEnvelope,
+               let key = try? CryptoService.openSealedKey(env),
                let text = try? CryptoService.decryptContent(cipher, under: key) {
                 return text
             }
-            return nil
+            // Fallback: caller may have stored plaintext when envelopes were absent.
+            return cipher
         }()
 
-        VStack(spacing: 16) {
-            Spacer()
-            if let plain {
-                Text(plain)
-                    .font(.system(size: 26, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 28)
-            } else if s.encryptedMediaUrl != nil {
-                Image(systemName: "photo")
-                    .font(.system(size: 80))
-                    .foregroundStyle(.white.opacity(0.25))
-                Text("Media stories soon")
-                    .font(.system(size: 13, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.4))
-            } else {
-                Text("[unable to decrypt]")
-                    .font(.system(size: 16, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.5))
+        let mediaImage: UIImage? = {
+            guard let raw = s.encryptedMediaUrl,
+                  let data = Data(base64Encoded: raw) else { return nil }
+            return UIImage(data: data)
+        }()
+
+        ZStack {
+            if let mediaImage {
+                Image(uiImage: mediaImage)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
             }
-            Spacer()
+
+            VStack {
+                Spacer()
+                if let plain, !plain.isEmpty {
+                    Text(plain)
+                        .font(.system(size: mediaImage == nil ? 26 : 18, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 14)
+                        .background(
+                            mediaImage == nil
+                                ? AnyShapeStyle(Color.clear)
+                                : AnyShapeStyle(LinearGradient(colors: [.clear, .black.opacity(0.55)], startPoint: .top, endPoint: .bottom))
+                        )
+                }
+                if mediaImage == nil && (plain == nil || plain?.isEmpty == true) {
+                    Text("[unable to decrypt]")
+                        .font(.system(size: 16, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.5))
+                }
+                Spacer().frame(height: mediaImage == nil ? 0 : 80)
+            }
         }
     }
 

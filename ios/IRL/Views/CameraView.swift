@@ -226,11 +226,14 @@ final class CameraPreviewUIView: UIView {
 struct CameraView: View {
 
     @EnvironmentObject var postStore: PostStore
+    enum PublishMode { case post, story }
+
     @StateObject private var camera = CameraService()
 
     @State private var cameraPermission: AVAuthorizationStatus = .notDetermined
     @State private var mode: CameraMode = .photo
     @State private var caption: String = ""
+    @State private var publishMode: PublishMode = .post
     @State private var showPosted = false
     @State private var showLocation = true
     @State private var locationName: String = ""
@@ -457,7 +460,7 @@ struct CameraView: View {
                         .clipShape(Capsule())
                 }
                 .padding(.horizontal, 16)
-                .padding(.top, 8)
+                .padding(.top, 54) // Clear the status bar
 
                 Spacer()
 
@@ -515,6 +518,11 @@ struct CameraView: View {
                         .buttonStyle(.plain)
                     }
 
+                    // Publish mode toggle
+                    publishModeToggle
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 8)
+
                     // Caption + Post
                     HStack(spacing: 10) {
                         TextField("Add a caption...", text: $caption)
@@ -531,12 +539,12 @@ struct CameraView: View {
                             UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                             postCapture()
                         } label: {
-                            Text("Post")
+                            Text(publishMode == .post ? "Post" : "Story")
                                 .font(.system(size: 16, weight: .bold, design: .rounded))
                                 .foregroundStyle(.white)
                                 .padding(.horizontal, 24)
                                 .padding(.vertical, 12)
-                                .background(IRLColors.oceanBlue)
+                                .background(publishMode == .post ? IRLColors.oceanBlue : IRLColors.earthGreen)
                                 .clipShape(Capsule())
                         }
                     }
@@ -549,10 +557,7 @@ struct CameraView: View {
                 )
             }
         }
-        .ignoresSafeArea(.container, edges: .top)
-        .onTapGesture {
-            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-        }
+        .toolbar(.hidden, for: .navigationBar)
     }
 
     // MARK: - Posted overlay
@@ -658,15 +663,23 @@ struct CameraView: View {
     }
 
     private func resolveLocation() {
-        guard let location = LocationService.shared.currentLocation else {
-            locationName = ""
-            return
-        }
-        let geocoder = CLGeocoder()
-        geocoder.reverseGeocodeLocation(location) { placemarks, _ in
-            if let place = placemarks?.first {
-                let parts = [place.locality, place.administrativeArea, place.country].compactMap { $0 }
-                locationName = parts.prefix(2).joined(separator: ", ")
+        // Request fresh location
+        LocationService.shared.requestLocation()
+
+        // Small delay to let GPS update
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            guard let location = LocationService.shared.currentLocation else {
+                locationName = ""
+                return
+            }
+            let geocoder = CLGeocoder()
+            geocoder.reverseGeocodeLocation(location) { placemarks, _ in
+                if let place = placemarks?.first {
+                    // Use subLocality (neighborhood) if available, then locality (city)
+                    let name = place.subLocality ?? place.locality
+                    let parts = [name, place.administrativeArea].compactMap { $0 }
+                    locationName = parts.joined(separator: ", ")
+                }
             }
         }
     }
@@ -675,16 +688,16 @@ struct CameraView: View {
         let cap = caption.trimmingCharacters(in: .whitespacesAndNewlines)
         let capValue = cap.isEmpty ? nil : cap
 
-        print("[IRL] postCapture called, photo: \(camera.capturedPhoto != nil), video: \(camera.recordedVideoURL != nil)")
+        print("[IRL] postCapture called, mode: \(publishMode), photo: \(camera.capturedPhoto != nil), video: \(camera.recordedVideoURL != nil)")
 
-        if let photo = camera.capturedPhoto {
-            print("[IRL] Saving photo with trust: \(importedTrustLevel.rawValue)")
-            postStore.savePhoto(image: photo, caption: capValue, trustLevel: importedTrustLevel)
-            print("[IRL] Photo saved, total posts: \(postStore.posts.count)")
-        } else if let videoURL = camera.recordedVideoURL {
-            print("[IRL] Saving video from \(videoURL)...")
-            postStore.saveVideo(sourceURL: videoURL, duration: camera.recordedDuration, caption: capValue)
-            print("[IRL] Video saved, total posts: \(postStore.posts.count)")
+        if publishMode == .story {
+            publishAsStory(captionText: capValue)
+        } else {
+            if let photo = camera.capturedPhoto {
+                postStore.savePhoto(image: photo, caption: capValue, trustLevel: importedTrustLevel)
+            } else if let videoURL = camera.recordedVideoURL {
+                postStore.saveVideo(sourceURL: videoURL, duration: camera.recordedDuration, caption: capValue)
+            }
         }
 
         // Show confirmation then reset
@@ -692,8 +705,80 @@ struct CameraView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
             withAnimation { showPosted = false }
             self.caption = ""
+            self.publishMode = .post
             self.camera.resetCapture()
         }
+    }
+
+    /// Encrypt the caption (when present) under a fresh content key sealed for each
+    /// audience member, then post the photo media as base64 alongside. Video stories
+    /// are deferred for now.
+    private func publishAsStory(captionText: String?) {
+        guard let photo = camera.capturedPhoto else {
+            // Text-only stories use the StoryComposerSheet path; skip silently here.
+            return
+        }
+        let mediaBase64 = photo.jpegData(compressionQuality: 0.85)?.base64EncodedString()
+        Task {
+            do {
+                let audience = (try? await APIClient.shared.getStoryAudience()) ?? []
+                let recipientsWithKeys = audience.filter { $0.encryptionPublicKey != nil }
+
+                var sealedCaption: String? = nil
+                var envelopes: [(recipientId: String, sealedKey: String)] = []
+
+                if let captionText, !recipientsWithKeys.isEmpty {
+                    let key = CryptoService.freshContentKey()
+                    sealedCaption = try CryptoService.encryptContent(captionText, under: key)
+                    for r in recipientsWithKeys {
+                        if let pub = r.encryptionPublicKey,
+                           let sealed = try? CryptoService.sealContentKey(key, forRecipientPubKeyBase64: pub) {
+                            envelopes.append((recipientId: r.id, sealedKey: sealed))
+                        }
+                    }
+                } else {
+                    sealedCaption = captionText
+                }
+
+                _ = try await APIClient.shared.createStory(
+                    encryptedContent: sealedCaption,
+                    encryptedMediaUrl: mediaBase64,
+                    trustLevel: importedTrustLevel.rawValue,
+                    envelopes: envelopes
+                )
+                print("[IRL] Story published")
+            } catch {
+                print("[IRL] Story publish failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private var publishModeToggle: some View {
+        HStack(spacing: 0) {
+            ForEach([PublishMode.post, .story], id: \.self) { mode in
+                Button {
+                    withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+                        publishMode = mode
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: mode == .post ? "square.grid.2x2" : "sparkles")
+                            .font(.system(size: 11))
+                        Text(mode == .post ? "Post" : "Story · 24h")
+                            .font(.system(size: 12, weight: publishMode == mode ? .bold : .medium, design: .rounded))
+                    }
+                    .foregroundStyle(publishMode == mode ? .white : .white.opacity(0.5))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 7)
+                    .background(publishMode == mode ? Color.white.opacity(0.18) : Color.clear)
+                    .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(3)
+        .background(Color.white.opacity(0.06))
+        .clipShape(Capsule())
     }
 
     private func generateThumbnail(for url: URL) -> UIImage? {
