@@ -190,17 +190,20 @@ struct FeedView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    HStack(spacing: 6) {
-                        Image("EarthBluMarble")
-                            .resizable()
-                            .scaledToFill()
-                            .frame(width: 34, height: 34)
-                            .clipShape(Circle())
-                        Text("irl")
-                            .font(.system(size: 22, weight: .black, design: .rounded))
-                            .foregroundStyle(IRLColors.primaryText)
-                            .tracking(2)
+                    Button { showWorldMap = true } label: {
+                        HStack(spacing: 6) {
+                            Image("EarthBluMarble")
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: 34, height: 34)
+                                .clipShape(Circle())
+                            Text("irl")
+                                .font(.system(size: 22, weight: .black, design: .rounded))
+                                .foregroundStyle(IRLColors.primaryText)
+                                .tracking(2)
+                        }
                     }
+                    .buttonStyle(.plain)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { showMessages = true } label: {
@@ -756,6 +759,8 @@ private struct FeedPostCard: View {
                             }
                         }
                         .foregroundStyle(showReactionBar || myReaction != nil ? IRLColors.oceanBlue : IRLColors.primaryText)
+                        .padding(.vertical, 4)
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
 
