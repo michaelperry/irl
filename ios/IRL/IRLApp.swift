@@ -1,12 +1,31 @@
 import SwiftUI
+import UIKit
+
+final class IRLAppDelegate: NSObject, UIApplicationDelegate {
+    func application(
+        _ application: UIApplication,
+        didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
+    ) {
+        PushService.shared.handleRegistration(token: deviceToken)
+    }
+
+    func application(
+        _ application: UIApplication,
+        didFailToRegisterForRemoteNotificationsWithError error: Error
+    ) {
+        print("[push] APNs registration failed: \(error.localizedDescription)")
+    }
+}
 
 @main
 struct IRLApp: App {
 
+    @UIApplicationDelegateAdaptor(IRLAppDelegate.self) var appDelegate
     @StateObject private var authService = AuthService()
     @StateObject private var screenTimeService = ScreenTimeService()
     @StateObject private var postStore = PostStore()
     @AppStorage("irl_theme") private var selectedTheme: AppTheme = .system
+    @AppStorage("irl_onboarding_completed") private var onboardingCompleted = false
     @Environment(\.scenePhase) private var scenePhase
     @State private var isLocked = false
 
@@ -15,12 +34,20 @@ struct IRLApp: App {
             ZStack {
                 Group {
                     if authService.isAuthenticated {
-                        MainTabView()
-                            .onAppear {
-                                screenTimeService.start()
-                                LocationService.shared.requestPermission()
-                            }
-                            .onDisappear { screenTimeService.stop() }
+                        if !onboardingCompleted || authService.didJustRegister {
+                            OnboardingView(onComplete: {
+                                onboardingCompleted = true
+                                authService.didJustRegister = false
+                            })
+                        } else {
+                            MainTabView()
+                                .onAppear {
+                                    screenTimeService.start()
+                                    LocationService.shared.requestPermission()
+                                    Task { await PushService.shared.requestAuthorizationAndRegister() }
+                                }
+                                .onDisappear { screenTimeService.stop() }
+                        }
                     } else {
                         LoginView()
                     }

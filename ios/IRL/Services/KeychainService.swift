@@ -11,6 +11,7 @@ enum KeychainService {
     static let authTokenKey = "irl_auth_token"
     static let userIdKey = "irl_user_id"
     static let biometricKeyIdKey = "irl_biometric_key_id"
+    static let encryptionPrivateKey = "irl_encryption_private_key"
 
     // MARK: - Save
 
@@ -54,6 +55,34 @@ enum KeychainService {
         return string
     }
 
+    // MARK: - Save/load raw Data
+
+    static func saveData(key: String, value: Data) {
+        delete(key: key)
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: key,
+            kSecValueData as String: value,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
+        ]
+        SecItemAdd(query as CFDictionary, nil)
+    }
+
+    static func loadData(key: String) -> Data? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: key,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        guard status == errSecSuccess, let data = result as? Data else { return nil }
+        return data
+    }
+
     // MARK: - Delete
 
     static func delete(key: String) {
@@ -72,6 +101,7 @@ enum KeychainService {
         delete(key: authTokenKey)
         delete(key: userIdKey)
         delete(key: biometricKeyIdKey)
+        delete(key: encryptionPrivateKey)
     }
 
     // MARK: - Helpers

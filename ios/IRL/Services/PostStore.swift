@@ -138,6 +138,7 @@ final class PostStore: ObservableObject {
         if let index = posts.firstIndex(where: { $0.id == postId }) {
             let old = posts[index]
             let updated = Post(
+                serverId: old.serverId,
                 authorId: old.authorId,
                 authorName: old.authorName,
                 mediaType: old.mediaType,
@@ -154,6 +155,7 @@ final class PostStore: ObservableObject {
         if let index = myPosts.firstIndex(where: { $0.id == postId }) {
             let old = myPosts[index]
             let updated = Post(
+                serverId: old.serverId,
                 authorId: old.authorId,
                 authorName: old.authorName,
                 mediaType: old.mediaType,
@@ -194,6 +196,7 @@ final class PostStore: ObservableObject {
             let fuzzed = PostLocation.fuzzy(latitude: loc.latitude, longitude: loc.longitude)
             if fuzzed.latitude == loc.latitude && fuzzed.longitude == loc.longitude { return post }
             return Post(
+                serverId: post.serverId,
                 authorId: post.authorId, authorName: post.authorName,
                 mediaType: post.mediaType, mediaFilename: post.mediaFilename,
                 thumbnailFilename: post.thumbnailFilename, caption: post.caption,
@@ -225,16 +228,27 @@ final class PostStore: ObservableObject {
             .flatMap { String(data: $0, encoding: .utf8) }
 
         do {
-            _ = try await APIClient.shared.createPost(
+            let serverPost = try await APIClient.shared.createPost(
                 content: contentString,
                 mediaBase64: base64,
                 mediaKey: nil
             )
-            print("[IRL] Post synced to server")
+            await MainActor.run { setServerId(serverPost.id, for: post.id) }
+            print("[IRL] Post synced to server (\(serverPost.id))")
         } catch {
             print("[IRL] Failed to sync post: \(error.localizedDescription)")
             // Post is saved locally — will retry on next launch
         }
+    }
+
+    private func setServerId(_ serverId: String, for localId: UUID) {
+        if let i = posts.firstIndex(where: { $0.id == localId }) {
+            posts[i].serverId = serverId
+        }
+        if let i = myPosts.firstIndex(where: { $0.id == localId }) {
+            myPosts[i].serverId = serverId
+        }
+        persist()
     }
 
     /// Fetch posts from server and merge with local

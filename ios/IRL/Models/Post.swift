@@ -45,6 +45,7 @@ struct PostLocation: Codable {
 
 struct Post: Identifiable, Codable {
     let id: UUID
+    var serverId: String?
     let authorId: String
     let authorName: String
     let mediaType: MediaType
@@ -57,6 +58,7 @@ struct Post: Identifiable, Codable {
     let trustLevel: TrustLevel
 
     init(
+        serverId: String? = nil,
         authorId: String = "me",
         authorName: String = "You",
         mediaType: MediaType,
@@ -68,6 +70,7 @@ struct Post: Identifiable, Codable {
         trustLevel: TrustLevel = .verified
     ) {
         self.id = UUID()
+        self.serverId = serverId
         self.authorId = authorId
         self.authorName = authorName
         self.mediaType = mediaType
@@ -83,6 +86,7 @@ struct Post: Identifiable, Codable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
+        serverId = try container.decodeIfPresent(String.self, forKey: .serverId)
         authorId = try container.decode(String.self, forKey: .authorId)
         authorName = try container.decode(String.self, forKey: .authorName)
         mediaType = try container.decode(MediaType.self, forKey: .mediaType)

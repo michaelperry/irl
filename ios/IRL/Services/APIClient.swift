@@ -24,14 +24,36 @@ final class APIClient {
         let createdAt: String
     }
 
-    /// Register a new user
-    func register(biometricKeyId: String, displayName: String) async throws -> AuthResponse {
-        let body: [String: Any] = [
-            "publicKey": biometricKeyId, // simplified — using biometricKeyId as public key for now
+    /// Register a new user. Optional `inviteCode` redeems an existing invite,
+    /// auto-mutual-follows the inviter, and rewards them with a bonus slot.
+    func register(biometricKeyId: String, displayName: String, encryptionPublicKey: String?, inviteCode: String? = nil) async throws -> AuthResponse {
+        var body: [String: Any] = [
+            "publicKey": biometricKeyId, // simplified — using biometricKeyId as attestation key for now
             "displayNameHash": displayName,
             "biometricKeyId": biometricKeyId,
         ]
+        if let encryptionPublicKey { body["encryptionPublicKey"] = encryptionPublicKey }
+        if let inviteCode = inviteCode?.trimmingCharacters(in: .whitespaces).uppercased(),
+           !inviteCode.isEmpty {
+            body["inviteCode"] = inviteCode
+        }
         return try await post(path: "/auth/register", body: body)
+    }
+
+    struct InvitePeek: Codable {
+        let valid: Bool
+        let inviterId: String
+    }
+
+    /// Verify an invite code is valid and returns the inviter's ID (used to show "invited by ..." in onboarding).
+    func peekInvite(code: String) async throws -> InvitePeek {
+        return try await get(path: "/auth/invite/\(code.uppercased())")
+    }
+
+    /// Upload (or rotate) the device's X25519 encryption public key.
+    func uploadEncryptionPublicKey(_ pubKeyBase64: String) async throws {
+        struct R: Codable { let updated: Bool }
+        let _: R = try await post(path: "/auth/encryption-key", body: ["encryptionPublicKey": pubKeyBase64], authenticated: true)
     }
 
     /// Login with existing biometric key
@@ -86,6 +108,10 @@ final class APIClient {
         let encryptedProfile: String?
         let followers: Int
         let following: Int
+        let friendLimit: Int?
+        let friendSlotsRemaining: Int?
+        let bonusSlotsUnlocked: Int?
+        let bonusSlotsMax: Int?
         let screenLimitSeconds: Int
         let createdAt: String
     }
@@ -119,12 +145,160 @@ final class APIClient {
         return try await get(path: "/screen-time", authenticated: true)
     }
 
+    // MARK: - Invites
+
+    struct InvitesResponse: Codable {
+        let invites: [Invite]
+    }
+
+    /// Mint up to 5 invite codes (re-uses any unredeemed live ones, idempotent if you already have them).
+    func mintInvites(count: Int = 5) async throws -> [Invite] {
+        let r: InvitesResponse = try await post(path: "/invites", body: ["count": count], authenticated: true)
+        return r.invites
+    }
+
+    func listMyInvites() async throws -> [Invite] {
+        let r: InvitesResponse = try await get(path: "/invites/me", authenticated: true)
+        return r.invites
+    }
+
+    func registerAPNsToken(token: String, deviceId: String, environment: String) async throws {
+        struct R: Codable { let registered: Bool }
+        let _: R = try await post(
+            path: "/profile/apns-tokens",
+            body: ["token": token, "deviceId": deviceId, "environment": environment],
+            authenticated: true
+        )
+    }
+
     func pingScreenTime(seconds: Int) async throws {
         let body: [String: Any] = ["seconds": seconds]
         struct PingResponse: Codable {
             let recorded: Bool
         }
         let _: PingResponse = try await post(path: "/screen-time/ping", body: body, authenticated: true)
+    }
+
+    // MARK: - Reactions
+
+    func setReaction(postId: String, kind: ReactionKind) async throws {
+        struct R: Codable { let kind: String }
+        let _: R = try await put(path: "/reactions/\(postId)", body: ["kind": kind.rawValue], authenticated: true)
+    }
+
+    func clearReaction(postId: String) async throws {
+        struct R: Codable { let removed: Bool }
+        let _: R = try await delete(path: "/reactions/\(postId)", authenticated: true)
+    }
+
+    func getReactions(postId: String) async throws -> ReactionSummary {
+        return try await get(path: "/reactions/\(postId)", authenticated: true)
+    }
+
+    // MARK: - Comments
+
+    struct CommentsResponse: Codable {
+        let comments: [Comment]
+    }
+
+    struct AudienceRecipient: Codable {
+        let id: String
+        let encryptionPublicKey: String?
+    }
+
+    struct AudienceResponse: Codable {
+        let recipients: [AudienceRecipient]
+    }
+
+    func getPostAudience(postId: String) async throws -> [AudienceRecipient] {
+        let r: AudienceResponse = try await get(path: "/posts/\(postId)/audience", authenticated: true)
+        return r.recipients
+    }
+
+    func createComment(
+        postId: String,
+        encryptedContent: String,
+        parentCommentId: String? = nil,
+        envelopes: [(recipientId: String, sealedKey: String)] = []
+    ) async throws -> Comment {
+        var body: [String: Any] = ["encryptedContent": encryptedContent]
+        if let parentCommentId { body["parentCommentId"] = parentCommentId }
+        if !envelopes.isEmpty {
+            body["envelopes"] = envelopes.map { ["recipientId": $0.recipientId, "sealedKey": $0.sealedKey] }
+        }
+        struct R: Codable { let comment: Comment }
+        let r: R = try await post(path: "/comments/posts/\(postId)", body: body, authenticated: true)
+        return r.comment
+    }
+
+    func getComments(postId: String) async throws -> [Comment] {
+        let r: CommentsResponse = try await get(path: "/comments/posts/\(postId)", authenticated: true)
+        return r.comments
+    }
+
+    func deleteComment(id: String) async throws {
+        struct R: Codable { let deleted: Bool }
+        let _: R = try await delete(path: "/comments/\(id)", authenticated: true)
+    }
+
+    // MARK: - Safety
+
+    func blockUser(_ userId: String) async throws {
+        struct R: Codable { let blocked: Bool }
+        let _: R = try await post(path: "/safety/blocks/\(userId)", body: [:], authenticated: true)
+    }
+
+    func unblockUser(_ userId: String) async throws {
+        struct R: Codable { let unblocked: Bool }
+        let _: R = try await delete(path: "/safety/blocks/\(userId)", authenticated: true)
+    }
+
+    struct BlockEntry: Codable {
+        let blockedId: String
+        let createdAt: String
+    }
+
+    struct BlocksResponse: Codable {
+        let blocks: [BlockEntry]
+    }
+
+    func listBlocks() async throws -> [BlockEntry] {
+        let r: BlocksResponse = try await get(path: "/safety/blocks", authenticated: true)
+        return r.blocks
+    }
+
+    func muteUser(_ userId: String, durationSeconds: Int? = nil) async throws {
+        var body: [String: Any] = [:]
+        if let durationSeconds { body["durationSeconds"] = durationSeconds }
+        struct R: Codable { let muted: Bool }
+        let _: R = try await post(path: "/safety/mutes/\(userId)", body: body, authenticated: true)
+    }
+
+    func unmuteUser(_ userId: String) async throws {
+        struct R: Codable { let unmuted: Bool }
+        let _: R = try await delete(path: "/safety/mutes/\(userId)", authenticated: true)
+    }
+
+    struct ModPubkeyResponse: Codable { let publicKey: String }
+
+    func getModeratorPublicKey() async throws -> String {
+        let r: ModPubkeyResponse = try await get(path: "/safety/mod-pubkey", authenticated: true)
+        return r.publicKey
+    }
+
+    func report(targetType: ReportTargetType, targetId: String, reason: ReportReason, note: String? = nil, encryptedEvidence: String? = nil) async throws {
+        var body: [String: Any] = [
+            "targetType": targetType.rawValue,
+            "targetId": targetId,
+            "reason": reason.rawValue,
+        ]
+        if let note { body["note"] = note }
+        if let encryptedEvidence { body["encryptedEvidence"] = encryptedEvidence }
+        struct R: Codable {
+            struct Inner: Codable { let id: String }
+            let report: Inner
+        }
+        let _: R = try await post(path: "/safety/reports", body: body, authenticated: true)
     }
 
     // MARK: - Generic Request Helpers
@@ -150,6 +324,13 @@ final class APIClient {
         request.httpMethod = "PUT"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        if authenticated { addAuth(to: &request) }
+        return try await execute(request)
+    }
+
+    private func delete<T: Codable>(path: String, authenticated: Bool = false) async throws -> T {
+        var request = URLRequest(url: URL(string: baseURL + path)!)
+        request.httpMethod = "DELETE"
         if authenticated { addAuth(to: &request) }
         return try await execute(request)
     }

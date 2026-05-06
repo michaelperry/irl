@@ -404,16 +404,13 @@ private struct FeedPostCard: View {
     var onWhyTapped: (() -> Void)?
 
     @State private var showFullCaption = false
-    @State private var reactions: [String: Int] = [:]
-    @State private var myReactions: Set<String> = []
+    @State private var reactionCounts: [ReactionKind: Int] = [:]
+    @State private var myReaction: ReactionKind?
     @State private var showReactionBar = false
-    @State private var showMoreEmojis = false
     @State private var showPostDetail = false
-
-    // Path-inspired primary reactions
-    private let quickReactions = ["❤️", "😂", "😮", "😢", "🔥"]
-    // Extended set
-    private let moreEmojis = ["😍", "🙌", "💯", "🌍", "✨", "🤯", "👏", "🥺", "💪", "🫶", "🎉", "💀", "😭", "🤩", "🙏", "👀"]
+    @State private var showComments = false
+    @State private var showReportSheet = false
+    @State private var showBlockConfirm = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -455,29 +452,30 @@ private struct FeedPostCard: View {
 
             // Actions + Caption
             VStack(alignment: .leading, spacing: 8) {
-                // Existing reaction chips
-                if !reactions.isEmpty {
+                // Reaction chips — one per kind that has at least 1
+                let nonEmpty = ReactionKind.allCases.filter { (reactionCounts[$0] ?? 0) > 0 }
+                if !nonEmpty.isEmpty {
                     FlowLayout(spacing: 6) {
-                        ForEach(reactions.sorted(by: { $0.key < $1.key }), id: \.key) { emoji, count in
+                        ForEach(nonEmpty, id: \.self) { kind in
+                            let isMine = myReaction == kind
                             Button {
                                 withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
-                                    toggleReaction(emoji)
+                                    setReaction(kind)
                                 }
                             } label: {
                                 HStack(spacing: 4) {
-                                    Text(emoji)
-                                        .font(.system(size: 16))
-                                    Text("\(count)")
+                                    Text(kind.emoji).font(.system(size: 16))
+                                    Text("\(reactionCounts[kind] ?? 0)")
                                         .font(.system(size: 13, weight: .bold, design: .rounded))
-                                        .foregroundStyle(myReactions.contains(emoji) ? IRLColors.oceanBlue : IRLColors.primaryText.opacity(0.7))
+                                        .foregroundStyle(isMine ? IRLColors.oceanBlue : IRLColors.primaryText.opacity(0.7))
                                 }
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 6)
-                                .background(myReactions.contains(emoji) ? IRLColors.oceanBlue.opacity(0.15) : .white.opacity(0.06))
+                                .background(isMine ? IRLColors.oceanBlue.opacity(0.15) : .white.opacity(0.06))
                                 .clipShape(Capsule())
                                 .overlay(
                                     Capsule()
-                                        .stroke(myReactions.contains(emoji) ? IRLColors.oceanBlue.opacity(0.3) : .white.opacity(0.08), lineWidth: 1)
+                                        .stroke(isMine ? IRLColors.oceanBlue.opacity(0.3) : .white.opacity(0.08), lineWidth: 1)
                                 )
                             }
                             .buttonStyle(.plain)
@@ -485,76 +483,30 @@ private struct FeedPostCard: View {
                     }
                 }
 
-                // Reaction drawer
+                // Path-style fixed bar — 6 kinds, single-replace
                 if showReactionBar {
-                    VStack(spacing: 8) {
-                        // Quick reactions — generous spacing
-                        HStack(spacing: 4) {
-                            ForEach(Array(quickReactions.enumerated()), id: \.element) { index, emoji in
-                                Button {
-                                    withAnimation(.spring(response: 0.25, dampingFraction: 0.6)) {
-                                        toggleReaction(emoji)
-                                    }
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                                        withAnimation(.easeOut(duration: 0.2)) {
-                                            showReactionBar = false
-                                            showMoreEmojis = false
-                                        }
-                                    }
-                                } label: {
-                                    Text(emoji)
-                                        .font(.system(size: 28))
-                                        .scaleEffect(myReactions.contains(emoji) ? 1.15 : 1.0)
-                                        .frame(width: 48, height: 48)
-                                        .background(myReactions.contains(emoji) ? IRLColors.oceanBlue.opacity(0.15) : .clear)
-                                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                                        .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                            }
-
+                    HStack(spacing: 4) {
+                        ForEach(ReactionKind.allCases, id: \.self) { kind in
+                            let isMine = myReaction == kind
                             Button {
-                                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                                    showMoreEmojis.toggle()
+                                withAnimation(.spring(response: 0.25, dampingFraction: 0.6)) {
+                                    setReaction(kind)
+                                }
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                                    withAnimation(.easeOut(duration: 0.2)) {
+                                        showReactionBar = false
+                                    }
                                 }
                             } label: {
-                                Image(systemName: showMoreEmojis ? "xmark" : "plus")
-                                    .font(.system(size: 16, weight: .semibold))
-                                    .foregroundStyle(.white.opacity(0.5))
-                                    .frame(width: 48, height: 48)
-                                    .background(.white.opacity(0.08))
+                                Text(kind.emoji)
+                                    .font(.system(size: 28))
+                                    .scaleEffect(isMine ? 1.15 : 1.0)
+                                    .frame(width: 44, height: 44)
+                                    .background(isMine ? IRLColors.oceanBlue.opacity(0.15) : .clear)
                                     .clipShape(RoundedRectangle(cornerRadius: 12))
                                     .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
-                        }
-
-                        if showMoreEmojis {
-                            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 6), spacing: 6) {
-                                ForEach(moreEmojis, id: \.self) { emoji in
-                                    Button {
-                                        withAnimation(.spring(response: 0.25, dampingFraction: 0.6)) {
-                                            toggleReaction(emoji)
-                                        }
-                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                                            withAnimation(.easeOut(duration: 0.2)) {
-                                                showReactionBar = false
-                                                showMoreEmojis = false
-                                            }
-                                        }
-                                    } label: {
-                                        Text(emoji)
-                                            .font(.system(size: 26))
-                                            .frame(width: 44, height: 44)
-                                            .background(myReactions.contains(emoji) ? IRLColors.oceanBlue.opacity(0.15) : .clear)
-                                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                                            .contentShape(Rectangle())
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                            .padding(.top, 4)
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
                         }
                     }
                     .padding(.horizontal, 14)
@@ -568,33 +520,62 @@ private struct FeedPostCard: View {
                     ))
                 }
 
-                // Action row — react button + send + info
+                // Action row — react button + comment + menu + info
                 HStack(spacing: 16) {
                     // React button — opens the Path-style bar
                     Button {
                         withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
                             showReactionBar.toggle()
-                            if !showReactionBar { showMoreEmojis = false }
                         }
                     } label: {
                         HStack(spacing: 6) {
-                            Image(systemName: showReactionBar ? "face.smiling.fill" : "face.smiling")
-                                .font(.system(size: 22))
-                            if reactions.isEmpty && !showReactionBar {
+                            if let myReaction {
+                                Text(myReaction.emoji).font(.system(size: 22))
+                            } else {
+                                Image(systemName: showReactionBar ? "face.smiling.fill" : "face.smiling")
+                                    .font(.system(size: 22))
+                            }
+                            if myReaction == nil && reactionCounts.isEmpty && !showReactionBar {
                                 Text("React")
                                     .font(.system(size: 14, weight: .medium, design: .rounded))
                             }
                         }
-                        .foregroundStyle(showReactionBar ? IRLColors.oceanBlue : IRLColors.primaryText)
+                        .foregroundStyle(showReactionBar || myReaction != nil ? IRLColors.oceanBlue : IRLColors.primaryText)
                     }
                     .buttonStyle(.plain)
 
-                    Button {} label: {
-                        Image(systemName: "paperplane")
+                    Button {
+                        showComments = true
+                    } label: {
+                        Image(systemName: "bubble.left")
                             .font(.system(size: 20))
                             .foregroundStyle(IRLColors.primaryText)
                     }
                     .buttonStyle(.plain)
+
+                    if post.authorId != "me" {
+                        Menu {
+                            Button {
+                                showReportSheet = true
+                            } label: {
+                                Label("Report", systemImage: "flag")
+                            }
+                            Button(role: .destructive) {
+                                showBlockConfirm = true
+                            } label: {
+                                Label("Block \(post.authorName)", systemImage: "person.crop.circle.badge.minus")
+                            }
+                            Button {
+                                Task { try? await APIClient.shared.muteUser(post.authorId) }
+                            } label: {
+                                Label("Mute", systemImage: "speaker.slash")
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis")
+                                .font(.system(size: 18))
+                                .foregroundStyle(IRLColors.primaryText)
+                        }
+                    }
 
                     Spacer()
 
@@ -630,6 +611,31 @@ private struct FeedPostCard: View {
             Rectangle()
                 .fill(.white.opacity(0.06))
                 .frame(height: 0.5)
+        }
+        .task { await loadReactions() }
+        .sheet(isPresented: $showComments) {
+            CommentsSheet(postServerId: post.serverId)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showReportSheet) {
+            if let serverId = post.serverId {
+                ReportSheet(targetType: .post, targetId: serverId, plaintextEvidence: post.caption)
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.visible)
+            } else {
+                pendingSyncSheet
+                    .presentationDetents([.medium])
+                    .presentationDragIndicator(.visible)
+            }
+        }
+        .alert("Block \(post.authorName)?", isPresented: $showBlockConfirm) {
+            Button("Cancel", role: .cancel) {}
+            Button("Block", role: .destructive) {
+                Task { try? await APIClient.shared.blockUser(post.authorId) }
+            }
+        } message: {
+            Text("You won't see their posts or comments, and they won't see yours. You can unblock anyone in Settings.")
         }
     }
 
@@ -675,17 +681,77 @@ private struct FeedPostCard: View {
 
     // MARK: - Reactions
 
-    private func toggleReaction(_ emoji: String) {
-        if myReactions.contains(emoji) {
-            myReactions.remove(emoji)
-            if let current = reactions[emoji], current > 1 {
-                reactions[emoji] = current - 1
-            } else {
-                reactions.removeValue(forKey: emoji)
-            }
+    private func setReaction(_ kind: ReactionKind) {
+        let previous = myReaction
+        if previous == kind {
+            // Tap again on same kind = clear
+            myReaction = nil
+            reactionCounts[kind] = max(0, (reactionCounts[kind] ?? 0) - 1)
         } else {
-            myReactions.insert(emoji)
-            reactions[emoji, default: 0] += 1
+            // Replace previous (if any), increment new
+            if let previous {
+                reactionCounts[previous] = max(0, (reactionCounts[previous] ?? 0) - 1)
+            }
+            myReaction = kind
+            reactionCounts[kind] = (reactionCounts[kind] ?? 0) + 1
+        }
+
+        // Sync to server (best-effort). Requires server-backed post.
+        guard let serverId = post.serverId else { return }
+        let next = myReaction
+        Task {
+            do {
+                if let next {
+                    try await APIClient.shared.setReaction(postId: serverId, kind: next)
+                } else {
+                    try await APIClient.shared.clearReaction(postId: serverId)
+                }
+            } catch {
+                // Roll back on failure
+                await MainActor.run { rollback(to: previous) }
+            }
+        }
+    }
+
+    private func rollback(to previous: ReactionKind?) {
+        // Recompute counts naively — refetch from server next time view appears
+        if let cur = myReaction { reactionCounts[cur] = max(0, (reactionCounts[cur] ?? 0) - 1) }
+        if let previous { reactionCounts[previous] = (reactionCounts[previous] ?? 0) + 1 }
+        myReaction = previous
+    }
+
+    private var pendingSyncSheet: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "icloud.and.arrow.up")
+                .font(.system(size: 36))
+                .foregroundStyle(IRLColors.oceanBlue.opacity(0.6))
+            Text("Still syncing this post")
+                .font(.system(size: 17, weight: .semibold, design: .rounded))
+                .foregroundStyle(IRLColors.primaryText)
+            Text("You can report it once it's synced to the server (usually a few seconds).")
+                .font(.system(size: 13, design: .rounded))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 24)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(IRLColors.deepSpace.ignoresSafeArea())
+    }
+
+    private func loadReactions() async {
+        guard let serverId = post.serverId else { return }
+        do {
+            let summary = try await APIClient.shared.getReactions(postId: serverId)
+            await MainActor.run {
+                var counts: [ReactionKind: Int] = [:]
+                for (raw, n) in summary.counts {
+                    if let k = ReactionKind(rawValue: raw) { counts[k] = n }
+                }
+                self.reactionCounts = counts
+                self.myReaction = summary.myKind
+            }
+        } catch {
+            // Silent — local state remains
         }
     }
 }

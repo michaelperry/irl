@@ -9,8 +9,11 @@ final class AuthService: ObservableObject {
     @Published private(set) var authError: String?
     @Published private(set) var userId: String?
     @Published private(set) var isLoading = false
+    /// Set to true when the most recent authenticate() created a brand-new account.
+    /// IRLApp uses this to route through OnboardingView before the main feed.
+    @Published var didJustRegister = false
 
-    func authenticate() async {
+    func authenticate(inviteCode: String? = nil) async {
         let context = LAContext()
         var error: NSError?
 
@@ -36,10 +39,16 @@ final class AuthService: ObservableObject {
             // Get or create a stable biometric key ID for this device
             let biometricKeyId = getOrCreateBiometricKeyId()
 
+            // Ensure we have a persistent X25519 keypair on this device before talking to the server.
+            let encryptionPubKey = try? CryptoService.currentPublicKeyBase64()
+
             // Try login first, then register if new user
             do {
                 let response = try await APIClient.shared.login(biometricKeyId: biometricKeyId)
                 handleAuthSuccess(response: response)
+                if let encryptionPubKey {
+                    try? await APIClient.shared.uploadEncryptionPublicKey(encryptionPubKey)
+                }
             } catch let apiError as APIError {
                 // If user not found, register
                 if case .serverError(let code, _) = apiError, code == 404 {
@@ -47,9 +56,12 @@ final class AuthService: ObservableObject {
                         let displayName = UserDefaults.standard.string(forKey: "irl_display_name") ?? "User"
                         let response = try await APIClient.shared.register(
                             biometricKeyId: biometricKeyId,
-                            displayName: displayName
+                            displayName: displayName,
+                            encryptionPublicKey: encryptionPubKey,
+                            inviteCode: inviteCode
                         )
                         handleAuthSuccess(response: response)
+                        didJustRegister = true
                         print("[IRL] New user registered: \(response.user?.id ?? "?")")
                     } catch {
                         authError = "Failed to create account: \(error.localizedDescription)"

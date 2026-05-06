@@ -121,6 +121,17 @@ struct SettingsView: View {
                     Text("Notifications")
                 }
 
+                // Safety
+                Section {
+                    NavigationLink {
+                        BlockedUsersView()
+                    } label: {
+                        Label("Blocked", systemImage: "person.crop.circle.badge.minus")
+                    }
+                } header: {
+                    Text("Safety")
+                }
+
                 // Privacy
                 Section {
                     Label("Your data is end-to-end encrypted", systemImage: "lock.fill")

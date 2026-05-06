@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { createDb, schema } from "../db/index.js";
-import { eq, desc, inArray } from "drizzle-orm";
+import { and, eq, desc, inArray, isNull, isNotNull } from "drizzle-orm";
 import { authMiddleware } from "../middleware/auth.js";
 import { screenTimeMiddleware } from "../middleware/screentime.js";
 import type { AppVariables } from "../types.js";
@@ -8,6 +8,30 @@ import type { AppVariables } from "../types.js";
 const posts = new Hono<{ Variables: AppVariables }>();
 
 posts.use("*", authMiddleware, screenTimeMiddleware);
+
+// Audience for a post: author + author's followers, with their X25519 pubkeys.
+// Used by clients to seal comment-key envelopes for everyone who can read the thread.
+posts.get("/:postId/audience", async (c) => {
+  const postId = c.req.param("postId");
+  const db = createDb();
+
+  const [post] = await db.select().from(schema.posts).where(eq(schema.posts.id, postId)).limit(1);
+  if (!post) return c.json({ error: "post not found" }, 404);
+
+  const followerRows = await db
+    .select({ id: schema.follows.followerId })
+    .from(schema.follows)
+    .where(eq(schema.follows.followingId, post.userId));
+
+  const audienceIds = Array.from(new Set([post.userId, ...followerRows.map((r) => r.id)]));
+
+  const recipients = await db
+    .select({ id: schema.users.id, encryptionPublicKey: schema.users.encryptionPublicKey })
+    .from(schema.users)
+    .where(and(inArray(schema.users.id, audienceIds), isNotNull(schema.users.encryptionPublicKey)));
+
+  return c.json({ recipients });
+});
 
 // Create an encrypted post
 posts.post("/", async (c) => {
@@ -53,10 +77,36 @@ posts.get("/feed", async (c) => {
     return c.json({ posts: [], hasMore: false });
   }
 
+  // Hide content from anyone the viewer has blocked, anyone who has blocked the viewer, or anyone muted.
+  const [blocked, blockedBy, muted] = await Promise.all([
+    db.select({ id: schema.blocks.blockedId }).from(schema.blocks).where(eq(schema.blocks.blockerId, userId)),
+    db.select({ id: schema.blocks.blockerId }).from(schema.blocks).where(eq(schema.blocks.blockedId, userId)),
+    db.select({ id: schema.mutes.mutedId }).from(schema.mutes).where(eq(schema.mutes.muterId, userId)),
+  ]);
+
+  const hiddenIds = [
+    ...blocked.map((r) => r.id),
+    ...blockedBy.map((r) => r.id),
+    ...muted.map((r) => r.id),
+  ];
+
+  const visibleIds = hiddenIds.length > 0
+    ? followingIds.filter((id) => !hiddenIds.includes(id))
+    : followingIds;
+
+  if (visibleIds.length === 0) {
+    return c.json({ posts: [], hasMore: false });
+  }
+
   const feedPosts = await db
     .select()
     .from(schema.posts)
-    .where(inArray(schema.posts.userId, followingIds))
+    .where(
+      and(
+        inArray(schema.posts.userId, visibleIds),
+        isNull(schema.posts.hiddenAt)
+      )
+    )
     .orderBy(desc(schema.posts.createdAt))
     .limit(limit + 1);
 

@@ -8,6 +8,27 @@
       "when": 1775611318776,
       "tag": "0000_aberrant_victor_mancha",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1778015509498,
+      "tag": "0001_broad_jackal",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1778020921453,
+      "tag": "0002_fancy_mole_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1778022243699,
+      "tag": "0003_clever_starhawk",
+      "breakpoints": true
     }
   ]
 }

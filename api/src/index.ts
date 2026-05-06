@@ -5,6 +5,10 @@ import auth from "./routes/auth.js";
 import posts from "./routes/posts.js";
 import profile from "./routes/profile.js";
 import screentime from "./routes/screentime.js";
+import reactions from "./routes/reactions.js";
+import comments from "./routes/comments.js";
+import safety from "./routes/safety.js";
+import invites from "./routes/invites.js";
 
 import type { AppVariables } from "./types.js";
 
@@ -24,5 +28,9 @@ app.route("/auth", auth);
 app.route("/posts", posts);
 app.route("/profile", profile);
 app.route("/screen-time", screentime);
+app.route("/reactions", reactions);
+app.route("/comments", comments);
+app.route("/safety", safety);
+app.route("/invites", invites);
 
 export default app;
