@@ -45,9 +45,7 @@ struct ActivitySheet: View {
             }
             .toolbarBackground(IRLColors.deepSpace, for: .navigationBar)
             .task { await load() }
-            .alert("Couldn't load activity", isPresented: .constant(errorMessage != nil)) {
-                Button("OK") { errorMessage = nil }
-            } message: { Text(errorMessage ?? "") }
+            // Errors are surfaced via the empty-state UI rather than a disruptive alert.
         }
     }
 

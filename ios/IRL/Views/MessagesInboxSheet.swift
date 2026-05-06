@@ -64,9 +64,7 @@ struct MessagesInboxSheet: View {
             .navigationDestination(item: $openWith) { c in
                 ConversationView(otherId: c.otherId, otherName: c.otherDisplayName, otherPubKey: c.otherEncryptionPublicKey)
             }
-            .alert("Couldn't load messages", isPresented: .constant(errorMessage != nil)) {
-                Button("OK") { errorMessage = nil }
-            } message: { Text(errorMessage ?? "") }
+            // Errors are surfaced via the empty-state UI below rather than a disruptive alert.
         }
     }
 
