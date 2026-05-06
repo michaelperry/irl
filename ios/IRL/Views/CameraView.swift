@@ -10,7 +10,7 @@ import UIKit
 enum CameraMode: String, CaseIterable {
     case photo = "Photo"
     case video = "Video"
-    case short = "Short"
+    case story = "Story"
 }
 
 // MARK: - CameraService
@@ -359,11 +359,9 @@ struct CameraView: View {
                     .stroke(Color.white.opacity(0.4), lineWidth: 4)
                     .frame(width: 80, height: 80)
 
-                if mode == .photo {
-                    Circle()
-                        .fill(Color.white)
-                        .frame(width: 66, height: 66)
-                } else {
+                // Photo and Story modes use the white shutter (tap to shoot).
+                // Video uses the red ring with a stop indicator while recording.
+                if mode == .video {
                     if camera.isRecording {
                         RoundedRectangle(cornerRadius: 8)
                             .fill(Color.red)
@@ -373,6 +371,10 @@ struct CameraView: View {
                             .fill(Color.red)
                             .frame(width: 66, height: 66)
                     }
+                } else {
+                    Circle()
+                        .fill(Color.white)
+                        .frame(width: 66, height: 66)
                 }
             }
         }
@@ -395,7 +397,11 @@ struct CameraView: View {
         HStack(spacing: 24) {
             ForEach(CameraMode.allCases, id: \.self) { m in
                 Button {
-                    withAnimation(.easeInOut(duration: 0.2)) { mode = m }
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        mode = m
+                        // Story mode pre-selects the story destination; everything else defaults to feed post.
+                        publishMode = (m == .story) ? .story : .post
+                    }
                 } label: {
                     Text(m.rawValue)
                         .font(.system(size: 14, weight: mode == m ? .bold : .medium, design: .rounded))
@@ -518,10 +524,13 @@ struct CameraView: View {
                         .buttonStyle(.plain)
                     }
 
-                    // Publish mode toggle
-                    publishModeToggle
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 8)
+                    // Publish mode toggle is only meaningful when capturing in Photo or Video mode.
+                    // Story mode already implies the story destination via the camera mode picker.
+                    if mode != .story {
+                        publishModeToggle
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 8)
+                    }
 
                     // Caption + Post
                     HStack(spacing: 10) {
@@ -640,10 +649,10 @@ struct CameraView: View {
         LocationService.shared.requestLocation()
 
         switch mode {
-        case .photo:
+        case .photo, .story:
             camera.capturePhoto()
             resolveLocation()
-        case .video, .short:
+        case .video:
             if camera.isRecording {
                 camera.stopRecording()
                 resolveLocation()

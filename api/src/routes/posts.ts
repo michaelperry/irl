@@ -9,6 +9,22 @@ const posts = new Hono<{ Variables: AppVariables }>();
 
 posts.use("*", authMiddleware, screenTimeMiddleware);
 
+// Delete a post (author only). Cascades remove reactions, comments, envelopes
+// via FK ON DELETE CASCADE.
+posts.delete("/:postId", async (c) => {
+  const userId = c.get("userId");
+  const postId = c.req.param("postId");
+  const db = createDb();
+
+  const result = await db
+    .delete(schema.posts)
+    .where(and(eq(schema.posts.id, postId), eq(schema.posts.userId, userId)))
+    .returning({ id: schema.posts.id });
+
+  if (result.length === 0) return c.json({ error: "not found" }, 404);
+  return c.json({ deleted: true });
+});
+
 // Audience for a post: author + author's followers, with their X25519 pubkeys.
 // Used by clients to seal comment-key envelopes for everyone who can read the thread.
 posts.get("/:postId/audience", async (c) => {

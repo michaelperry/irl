@@ -3,7 +3,6 @@ import Foundation
 enum MediaType: String, Codable {
     case photo
     case video
-    case short // < 60 seconds
 }
 
 enum TrustLevel: String, Codable {

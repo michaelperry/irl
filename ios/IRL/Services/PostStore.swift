@@ -64,7 +64,6 @@ final class PostStore: ObservableObject {
     // MARK: - Save video
 
     func saveVideo(sourceURL: URL, duration: TimeInterval, caption: String? = nil) {
-        let isShort = duration < 60
         let filename = "\(UUID().uuidString).mov"
         let destURL = Self.mediaURL(for: filename)
 
@@ -86,7 +85,7 @@ final class PostStore: ObservableObject {
         let postLocation = loc.map { PostLocation.fuzzy(latitude: $0.coordinate.latitude, longitude: $0.coordinate.longitude) }
 
         let post = Post(
-            mediaType: isShort ? .short : .video,
+            mediaType: .video,
             mediaFilename: filename,
             thumbnailFilename: thumbFilename,
             caption: caption,
@@ -130,6 +129,17 @@ final class PostStore: ObservableObject {
         posts.removeAll { $0.id == post.id }
         myPosts.removeAll { $0.id == post.id }
         persist()
+
+        // Best-effort server delete — local removal is the source of truth from the user's POV.
+        if let serverId = post.serverId {
+            Task {
+                do {
+                    try await APIClient.shared.deletePost(serverId: serverId)
+                } catch {
+                    print("[IRL] server delete post failed: \(error.localizedDescription)")
+                }
+            }
+        }
     }
 
     // MARK: - Update caption

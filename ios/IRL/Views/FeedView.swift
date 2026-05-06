@@ -861,7 +861,7 @@ private struct FeedPostCard: View {
         switch post.mediaType {
         case .photo:
             photoView
-        case .video, .short:
+        case .video:
             videoView
         }
     }
@@ -1480,7 +1480,7 @@ private struct FeedPostDetailView: View {
                         .scaledToFit()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-            case .video, .short:
+            case .video:
                 if let player {
                     VideoPlayerRepresentable(player: player)
                         .ignoresSafeArea()
@@ -1591,7 +1591,7 @@ private struct FeedPostDetailView: View {
             Text("This will permanently delete this photo/video.")
         }
         .onAppear {
-            if post.mediaType == .video || post.mediaType == .short {
+            if post.mediaType == .video {
                 let url = PostStore.mediaURL(for: post.mediaFilename)
                 player = AVPlayer(url: url)
                 player?.play()

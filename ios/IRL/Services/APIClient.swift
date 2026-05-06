@@ -101,6 +101,12 @@ final class APIClient {
         return try await get(path: "/posts/feed?limit=\(limit)", authenticated: true)
     }
 
+    /// Delete a post on the server (author only). 404 if it isn't yours / doesn't exist.
+    func deletePost(serverId: String) async throws {
+        struct R: Codable { let deleted: Bool }
+        let _: R = try await delete(path: "/posts/\(serverId)", authenticated: true)
+    }
+
     // MARK: - Profile
 
     struct ProfileResponse: Codable {

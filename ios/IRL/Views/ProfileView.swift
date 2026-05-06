@@ -456,7 +456,7 @@ struct ProfileView: View {
             switch post.mediaType {
             case .photo:
                 return post.mediaFilename
-            case .video, .short:
+            case .video:
                 return post.thumbnailFilename ?? post.mediaFilename
             }
         }()
@@ -481,7 +481,7 @@ struct ProfileView: View {
                 }
 
                 // Video play badge
-                if post.mediaType == .video || post.mediaType == .short {
+                if post.mediaType == .video {
                     VStack {
                         Spacer()
                         HStack {
@@ -724,7 +724,7 @@ private struct PostDetailView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .padding(.horizontal, 12)
             }
-        case .video, .short:
+        case .video:
             VideoPlayer(player: AVPlayer(url: PostStore.mediaURL(for: post.mediaFilename)))
                 .aspectRatio(post.aspectRatio, contentMode: .fit)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))

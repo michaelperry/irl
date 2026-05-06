@@ -10,7 +10,10 @@ struct WorldMapView: View {
 
     @State private var selectedCluster: LocationCluster?
     @State private var selectedPost: Post?
-    @State private var cameraPosition: MapCameraPosition = .automatic
+    @State private var cameraPosition: MapCameraPosition = .region(MKCoordinateRegion(
+        center: CLLocationCoordinate2D(latitude: 34.4, longitude: -119.7), // default to user area
+        span: MKCoordinateSpan(latitudeDelta: 0.5, longitudeDelta: 0.5) // see neighboring towns
+    ))
 
     private var clusters: [LocationCluster] {
         LocationCluster.clusterPosts(posts)
@@ -200,7 +203,7 @@ private struct ClusterDetailView: View {
         }
         .aspectRatio(1, contentMode: .fit)
         .overlay(alignment: .bottomTrailing) {
-            if post.mediaType == .video || post.mediaType == .short {
+            if post.mediaType == .video {
                 Image(systemName: "play.fill")
                     .font(.system(size: 10))
                     .foregroundStyle(.white)
@@ -245,7 +248,7 @@ private struct FeedPostDetailView2: View {
                         .scaledToFit()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-            case .video, .short:
+            case .video:
                 if let player {
                     VideoPlayerRepresentable2(player: player)
                         .ignoresSafeArea()

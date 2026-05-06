@@ -16,6 +16,9 @@ struct StoryViewer: View {
     @State private var videoPlayer: AVPlayer?
     @State private var videoEndObserver: NSObjectProtocol?
     @State private var videoTempURLs: [URL] = []   // cleaned up on dismiss
+    @State private var showDeleteConfirm: Bool = false
+    @State private var workingDelete: Bool = false
+    @State private var localStories: [Story] = []   // mutable copy for in-place deletion
 
     private let photoDuration: Double = 5.0
     private let maxVideoDuration: Double = 15.0    // cap for v1
@@ -70,6 +73,16 @@ struct StoryViewer: View {
                         .font(.system(size: 14, weight: .semibold, design: .rounded))
                         .foregroundStyle(.white)
                     Spacer()
+                    if isOwnGroup {
+                        Button { showDeleteConfirm = true } label: {
+                            Image(systemName: "trash")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 36, height: 36)
+                                .background(.black.opacity(0.4))
+                                .clipShape(Circle())
+                        }
+                    }
                     Button { onClose() } label: {
                         Image(systemName: "xmark")
                             .font(.system(size: 17, weight: .semibold))
@@ -91,12 +104,27 @@ struct StoryViewer: View {
                     if value.translation.height > 80 { onClose() }
                 }
         )
-        .task { startTicker() }
+        .task {
+            localStories = group.stories
+            startTicker()
+        }
         .onDisappear { teardown() }
         .task(id: index) {
             await markCurrentViewed()
             await prepareMediaForCurrent()
         }
+        .alert("Delete this story?", isPresented: $showDeleteConfirm) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) {
+                Task { await deleteCurrent() }
+            }
+        } message: {
+            Text("It will be removed for everyone. This can't be undone.")
+        }
+    }
+
+    private var isOwnGroup: Bool {
+        group.authorId == KeychainService.userId
     }
 
     @ViewBuilder
@@ -263,5 +291,19 @@ struct StoryViewer: View {
     private func markCurrentViewed() async {
         let s = group.stories[index]
         try? await APIClient.shared.markStoryViewed(s.id)
+    }
+
+    private func deleteCurrent() async {
+        guard !workingDelete else { return }
+        workingDelete = true
+        defer { workingDelete = false }
+        let storyId = group.stories[index].id
+        do {
+            try await APIClient.shared.deleteStory(storyId)
+            // The rings bar refreshes on the next pull-to-refresh; close the viewer immediately.
+            onClose()
+        } catch {
+            print("[IRL] story delete failed: \(error.localizedDescription)")
+        }
     }
 }
