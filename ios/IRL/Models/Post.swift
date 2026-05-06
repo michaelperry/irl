@@ -3,6 +3,18 @@ import Foundation
 enum MediaType: String, Codable {
     case photo
     case video
+
+    /// Back-compat decoder: posts persisted before the `.short` collapse stored
+    /// "short" as their mediaType. Map that (and any future unknown value) to
+    /// .video so a single legacy row can't kill the whole feed.
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        switch raw {
+        case "photo": self = .photo
+        case "video", "short": self = .video
+        default: self = .video
+        }
+    }
 }
 
 enum TrustLevel: String, Codable {

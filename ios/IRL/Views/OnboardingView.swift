@@ -133,7 +133,7 @@ struct OnboardingView: View {
         VStack(spacing: 12) {
             Spacer()
             Spacer().frame(height: 100)
-            Text("A smaller internet.")
+            Text("A smaller, safer, internet.")
                 .font(.system(size: 32, weight: .black, design: .rounded))
                 .foregroundStyle(.white)
                 .multilineTextAlignment(.center)

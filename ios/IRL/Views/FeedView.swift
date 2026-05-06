@@ -1132,23 +1132,13 @@ private struct VideoThumbnailView: View {
                 .onTapGesture { showFullscreenPlayer = true }
         }
         .fullScreenCover(isPresented: $showFullscreenPlayer) {
-            ZStack(alignment: .topLeading) {
-                FullscreenVideoPlayerController(
-                    url: PostStore.mediaURL(for: post.mediaFilename),
-                    isPresented: $showFullscreenPlayer
-                )
-                .ignoresSafeArea()
-
-                Button {
-                    showFullscreenPlayer = false
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 30))
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(.white)
-                        .padding(16)
-                }
-            }
+            // AVPlayerViewController already provides a close button + AirPlay
+            // controls; the prior custom xmark overlay duplicated the close.
+            FullscreenVideoPlayerController(
+                url: PostStore.mediaURL(for: post.mediaFilename),
+                isPresented: $showFullscreenPlayer
+            )
+            .ignoresSafeArea()
             .background(Color.black.ignoresSafeArea())
         }
     }

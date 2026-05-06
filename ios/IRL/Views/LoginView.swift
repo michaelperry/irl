@@ -13,6 +13,7 @@ struct LoginView: View {
     @State private var pendingInviteCode: String?
 
     private let manifesto = [
+        "a smaller, safer, internet",
         "every post made by a real human",
         "no ai. no bots. no fakes.",
         "own your data",

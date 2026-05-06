@@ -772,9 +772,6 @@ private struct InviteFriendView: View {
             .sheet(isPresented: $presentShare) {
                 ShareActivityView(items: shareItems)
             }
-            .alert("Couldn't load invites", isPresented: .constant(errorMessage != nil)) {
-                Button("OK") { errorMessage = nil }
-            } message: { Text(errorMessage ?? "") }
         }
     }
 
@@ -793,12 +790,32 @@ private struct InviteFriendView: View {
         VStack(spacing: 10) {
             if loading && invites.isEmpty {
                 ProgressView().tint(.white).padding(.vertical, 36)
+            } else if invites.isEmpty {
+                inviteEmptyState
             } else {
                 ForEach(invites) { inv in
                     codeRow(inv)
                 }
             }
         }
+    }
+
+    private var inviteEmptyState: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "envelope.badge")
+                .font(.system(size: 28))
+                .foregroundStyle(IRLColors.oceanBlue.opacity(0.5))
+            Text("Invites unavailable right now")
+                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                .foregroundStyle(IRLColors.primaryText)
+            Text("Pull to retry — or your friends will get invites once the server catches up.")
+                .font(.system(size: 12, design: .rounded))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 24)
+        }
+        .padding(.vertical, 28)
+        .frame(maxWidth: .infinity)
     }
 
     private func codeRow(_ inv: Invite) -> some View {
