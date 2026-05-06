@@ -267,7 +267,7 @@ private struct CommentRowView: View {
                                 Task { await react(kind) }
                             } label: {
                                 HStack(spacing: 3) {
-                                    Text(kind.emoji).font(.system(size: 12))
+                                    ReactionGlyph(kind: kind, size: 11)
                                     Text("\(counts[kind] ?? 0)")
                                         .font(.system(size: 11, weight: .bold, design: .rounded))
                                         .foregroundStyle(mine ? IRLColors.oceanBlue : IRLColors.primaryText.opacity(0.7))
@@ -289,8 +289,7 @@ private struct CommentRowView: View {
                                 Task { await react(kind) }
                                 withAnimation(.easeOut(duration: 0.18)) { showPicker = false }
                             } label: {
-                                Text(kind.emoji)
-                                    .font(.system(size: 22))
+                                ReactionGlyph(kind: kind, size: 20)
                                     .frame(width: 32, height: 32)
                                     .background(myReaction == kind ? IRLColors.oceanBlue.opacity(0.15) : .clear)
                                     .clipShape(RoundedRectangle(cornerRadius: 8))

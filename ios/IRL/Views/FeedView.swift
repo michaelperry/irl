@@ -760,7 +760,7 @@ private struct FeedPostCard: View {
                                 }
                             } label: {
                                 HStack(spacing: 4) {
-                                    Text(kind.emoji).font(.system(size: 16))
+                                    ReactionGlyph(kind: kind, size: 14)
                                     Text("\(reactionCounts[kind] ?? 0)")
                                         .font(.system(size: 13, weight: .bold, design: .rounded))
                                         .foregroundStyle(isMine ? IRLColors.oceanBlue : IRLColors.primaryText.opacity(0.7))
@@ -794,8 +794,7 @@ private struct FeedPostCard: View {
                                     }
                                 }
                             } label: {
-                                Text(kind.emoji)
-                                    .font(.system(size: 28))
+                                ReactionGlyph(kind: kind, size: 26)
                                     .scaleEffect(isMine ? 1.15 : 1.0)
                                     .frame(width: 44, height: 44)
                                     .background(isMine ? IRLColors.oceanBlue.opacity(0.15) : .clear)
@@ -818,7 +817,8 @@ private struct FeedPostCard: View {
 
                 // Action row — react button + comment + menu + info
                 HStack(spacing: 16) {
-                    // React button — opens the Path-style bar
+                    // React button — opens the Path-style bar.
+                    // Generous padding + explicit contentShape so this lands every time.
                     Button {
                         withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
                             showReactionBar.toggle()
@@ -826,7 +826,7 @@ private struct FeedPostCard: View {
                     } label: {
                         HStack(spacing: 6) {
                             if let myReaction {
-                                Text(myReaction.emoji).font(.system(size: 22))
+                                ReactionGlyph(kind: myReaction, size: 22)
                             } else {
                                 Image(systemName: showReactionBar ? "face.smiling.fill" : "face.smiling")
                                     .font(.system(size: 22))
@@ -837,7 +837,8 @@ private struct FeedPostCard: View {
                             }
                         }
                         .foregroundStyle(showReactionBar || myReaction != nil ? IRLColors.oceanBlue : IRLColors.primaryText)
-                        .padding(.vertical, 4)
+                        .padding(.vertical, 10)
+                        .padding(.horizontal, 8)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
