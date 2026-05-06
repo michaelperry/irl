@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { createDb, schema } from "../db/index.js";
-import { and, asc, eq, isNull, notInArray, inArray } from "drizzle-orm";
+import { and, asc, eq, isNull, notInArray, inArray, sql } from "drizzle-orm";
 import { authMiddleware } from "../middleware/auth.js";
 import { screenTimeMiddleware } from "../middleware/screentime.js";
 import { notifyUser } from "../services/push.js";
@@ -129,6 +129,9 @@ comments.get("/posts/:postId", async (c) => {
   // Attach this user's sealed key envelope (if any) so they can decrypt.
   const ids = rows.map((r) => r.id);
   let envelopesByComment: Record<string, string> = {};
+  let countsByComment: Record<string, Record<string, number>> = {};
+  let myReactionByComment: Record<string, string> = {};
+
   if (ids.length > 0) {
     const envelopes = await db
       .select({
@@ -143,11 +146,41 @@ comments.get("/posts/:postId", async (c) => {
         )
       );
     envelopesByComment = Object.fromEntries(envelopes.map((e) => [e.commentId, e.sealedKey]));
+
+    const counts = await db
+      .select({
+        commentId: schema.commentReactions.commentId,
+        kind: schema.commentReactions.kind,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(schema.commentReactions)
+      .where(inArray(schema.commentReactions.commentId, ids))
+      .groupBy(schema.commentReactions.commentId, schema.commentReactions.kind);
+    for (const r of counts) {
+      countsByComment[r.commentId] ??= {};
+      countsByComment[r.commentId][r.kind] = Number(r.count);
+    }
+
+    const mine = await db
+      .select({
+        commentId: schema.commentReactions.commentId,
+        kind: schema.commentReactions.kind,
+      })
+      .from(schema.commentReactions)
+      .where(
+        and(
+          inArray(schema.commentReactions.commentId, ids),
+          eq(schema.commentReactions.userId, userId)
+        )
+      );
+    myReactionByComment = Object.fromEntries(mine.map((r) => [r.commentId, r.kind]));
   }
 
   const enriched = rows.map((r) => ({
     ...r,
     myEnvelope: envelopesByComment[r.id] ?? null,
+    reactionCounts: countsByComment[r.id] ?? {},
+    myReaction: myReactionByComment[r.id] ?? null,
   }));
 
   return c.json({ comments: enriched });

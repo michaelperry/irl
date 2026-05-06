@@ -10,6 +10,8 @@ struct CommentsSheet: View {
     @State private var isSending = false
     @State private var errorMessage: String?
     @State private var replyTarget: Comment?
+    @State private var reportTarget: Comment?
+    @State private var blockTarget: Comment?
 
     var body: some View {
         NavigationStack {
@@ -23,9 +25,21 @@ struct CommentsSheet: View {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 14) {
                             ForEach(topLevel) { c in
-                                commentRow(c, isReply: false)
+                                CommentRowView(
+                                    comment: c,
+                                    isReply: false,
+                                    onReply: { replyTarget = c },
+                                    onReport: { reportTarget = c },
+                                    onBlock: { blockTarget = c }
+                                )
                                 ForEach(replies(of: c.id)) { r in
-                                    commentRow(r, isReply: true)
+                                    CommentRowView(
+                                        comment: r,
+                                        isReply: true,
+                                        onReply: nil,
+                                        onReport: { reportTarget = r },
+                                        onBlock: { blockTarget = r }
+                                    )
                                 }
                             }
                         }
@@ -51,6 +65,28 @@ struct CommentsSheet: View {
             .alert("Couldn't load comments", isPresented: .constant(errorMessage != nil)) {
                 Button("OK") { errorMessage = nil }
             } message: { Text(errorMessage ?? "") }
+            .sheet(item: $reportTarget) { c in
+                ReportSheet(
+                    targetType: .comment,
+                    targetId: c.id,
+                    plaintextEvidence: c.decryptedContent
+                )
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+            }
+            .alert("Block this person?", isPresented: Binding(
+                get: { blockTarget != nil },
+                set: { if !$0 { blockTarget = nil } }
+            )) {
+                Button("Cancel", role: .cancel) {}
+                Button("Block", role: .destructive) {
+                    if let target = blockTarget {
+                        Task { try? await APIClient.shared.blockUser(target.userId) }
+                    }
+                }
+            } message: {
+                Text("You won't see their posts or comments anywhere, and they won't see yours. Manage in Settings.")
+            }
         }
     }
 
@@ -62,33 +98,6 @@ struct CommentsSheet: View {
         comments.filter { $0.parentCommentId == id }
     }
 
-    private func commentRow(_ c: Comment, isReply: Bool) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Circle()
-                .fill(IRLColors.oceanBlue.opacity(0.3))
-                .frame(width: isReply ? 24 : 30, height: isReply ? 24 : 30)
-                .overlay(Image(systemName: "person.fill").foregroundStyle(.white.opacity(0.7)).font(.system(size: isReply ? 12 : 14)))
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(c.decryptedContent ?? c.encryptedContent)
-                    .font(.system(size: 14, design: .rounded))
-                    .foregroundStyle(IRLColors.primaryText)
-
-                HStack(spacing: 12) {
-                    Text(c.createdAt)
-                        .font(.system(size: 11, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.4))
-                    if !isReply {
-                        Button("Reply") { replyTarget = c }
-                            .font(.system(size: 11, weight: .semibold, design: .rounded))
-                            .foregroundStyle(IRLColors.oceanBlue)
-                    }
-                }
-            }
-            Spacer()
-        }
-        .padding(.leading, isReply ? 36 : 0)
-    }
 
     private var composer: some View {
         VStack(spacing: 6) {
@@ -217,6 +226,170 @@ struct CommentsSheet: View {
             replyTarget = nil
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+}
+
+// MARK: - Comment Row
+
+private struct CommentRowView: View {
+    let comment: Comment
+    let isReply: Bool
+    var onReply: (() -> Void)?
+    var onReport: () -> Void
+    var onBlock: () -> Void
+
+    @State private var counts: [ReactionKind: Int] = [:]
+    @State private var myReaction: ReactionKind?
+    @State private var showPicker: Bool = false
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Circle()
+                .fill(IRLColors.oceanBlue.opacity(0.3))
+                .frame(width: isReply ? 24 : 30, height: isReply ? 24 : 30)
+                .overlay(
+                    Image(systemName: "person.fill")
+                        .foregroundStyle(.white.opacity(0.7))
+                        .font(.system(size: isReply ? 12 : 14))
+                )
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(comment.decryptedContent ?? comment.encryptedContent)
+                    .font(.system(size: 14, design: .rounded))
+                    .foregroundStyle(IRLColors.primaryText)
+
+                if !nonEmptyKinds.isEmpty {
+                    HStack(spacing: 4) {
+                        ForEach(nonEmptyKinds, id: \.self) { kind in
+                            let mine = myReaction == kind
+                            Button {
+                                Task { await react(kind) }
+                            } label: {
+                                HStack(spacing: 3) {
+                                    Text(kind.emoji).font(.system(size: 12))
+                                    Text("\(counts[kind] ?? 0)")
+                                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                                        .foregroundStyle(mine ? IRLColors.oceanBlue : IRLColors.primaryText.opacity(0.7))
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(mine ? IRLColors.oceanBlue.opacity(0.15) : .white.opacity(0.06))
+                                .clipShape(Capsule())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+
+                if showPicker {
+                    HStack(spacing: 4) {
+                        ForEach(ReactionKind.allCases, id: \.self) { kind in
+                            Button {
+                                Task { await react(kind) }
+                                withAnimation(.easeOut(duration: 0.18)) { showPicker = false }
+                            } label: {
+                                Text(kind.emoji)
+                                    .font(.system(size: 22))
+                                    .frame(width: 32, height: 32)
+                                    .background(myReaction == kind ? IRLColors.oceanBlue.opacity(0.15) : .clear)
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                    .padding(.horizontal, 6)
+                    .background(.ultraThinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .transition(.scale(scale: 0.7, anchor: .leading).combined(with: .opacity))
+                }
+
+                HStack(spacing: 12) {
+                    Text(comment.createdAt)
+                        .font(.system(size: 11, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.4))
+
+                    Button {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+                            showPicker.toggle()
+                        }
+                    } label: {
+                        Image(systemName: "face.smiling")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.white.opacity(0.5))
+                    }
+                    .buttonStyle(.plain)
+
+                    if let onReply {
+                        Button("Reply", action: onReply)
+                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            .foregroundStyle(IRLColors.oceanBlue)
+                    }
+
+                    Spacer()
+
+                    Menu {
+                        Button { onReport() } label: {
+                            Label("Report", systemImage: "flag")
+                        }
+                        Button(role: .destructive, action: onBlock) {
+                            Label("Block", systemImage: "person.crop.circle.badge.minus")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.white.opacity(0.4))
+                            .padding(.horizontal, 4)
+                            .contentShape(Rectangle())
+                    }
+                }
+            }
+            Spacer()
+        }
+        .padding(.leading, isReply ? 36 : 0)
+        .onAppear { hydrate() }
+    }
+
+    private var nonEmptyKinds: [ReactionKind] {
+        ReactionKind.allCases.filter { (counts[$0] ?? 0) > 0 }
+    }
+
+    private func hydrate() {
+        var fresh: [ReactionKind: Int] = [:]
+        for (raw, n) in comment.reactionCounts ?? [:] {
+            if let k = ReactionKind(rawValue: raw) { fresh[k] = n }
+        }
+        counts = fresh
+        myReaction = comment.myReaction.flatMap(ReactionKind.init(rawValue:))
+    }
+
+    private func react(_ kind: ReactionKind) async {
+        let previous = myReaction
+        let isClear = previous == kind
+        // Optimistic update
+        if isClear {
+            myReaction = nil
+            counts[kind] = max(0, (counts[kind] ?? 0) - 1)
+        } else {
+            if let previous { counts[previous] = max(0, (counts[previous] ?? 0) - 1) }
+            myReaction = kind
+            counts[kind] = (counts[kind] ?? 0) + 1
+        }
+
+        do {
+            if isClear {
+                try await APIClient.shared.clearCommentReaction(commentId: comment.id)
+            } else {
+                try await APIClient.shared.setCommentReaction(commentId: comment.id, kind: kind)
+            }
+        } catch {
+            // Roll back
+            await MainActor.run {
+                if let cur = myReaction { counts[cur] = max(0, (counts[cur] ?? 0) - 1) }
+                if let previous { counts[previous] = (counts[previous] ?? 0) + 1 }
+                myReaction = previous
+            }
         }
     }
 }

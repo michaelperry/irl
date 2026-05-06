@@ -7,9 +7,12 @@ struct OnboardingView: View {
     @State private var step: Int = 0
     private let totalSteps = 5
 
+    /// Onboarding is a brand hero — always dark, regardless of system or app theme.
+    private static let onboardingBackground = Color(red: 0.04, green: 0.05, blue: 0.10)
+
     var body: some View {
         ZStack {
-            IRLColors.deepSpace.ignoresSafeArea()
+            Self.onboardingBackground.ignoresSafeArea()
 
             // Step content
             Group {
@@ -48,6 +51,7 @@ struct OnboardingView: View {
                 }
             }
         }
+        .environment(\.colorScheme, .dark)
         .preferredColorScheme(.dark)
     }
 

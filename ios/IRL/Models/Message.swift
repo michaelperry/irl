@@ -12,7 +12,7 @@ struct Message: Identifiable, Codable {
     var decryptedText: String?
 }
 
-struct ConversationSummary: Identifiable, Codable {
+struct ConversationSummary: Identifiable, Codable, Hashable {
     let id: String
     let otherId: String
     let otherDisplayName: String
@@ -22,7 +22,7 @@ struct ConversationSummary: Identifiable, Codable {
     let lastMessageAt: String?
     let createdAt: String
 
-    struct LastMessageStub: Codable {
+    struct LastMessageStub: Codable, Hashable {
         let conversationId: String
         let ciphertext: String
         let senderId: String

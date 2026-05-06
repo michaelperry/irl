@@ -303,6 +303,16 @@ final class APIClient {
         let _: R = try await delete(path: "/reactions/\(postId)", authenticated: true)
     }
 
+    func setCommentReaction(commentId: String, kind: ReactionKind) async throws {
+        struct R: Codable { let kind: String }
+        let _: R = try await put(path: "/reactions/comment/\(commentId)", body: ["kind": kind.rawValue], authenticated: true)
+    }
+
+    func clearCommentReaction(commentId: String) async throws {
+        struct R: Codable { let removed: Bool }
+        let _: R = try await delete(path: "/reactions/comment/\(commentId)", authenticated: true)
+    }
+
     func getReactions(postId: String) async throws -> ReactionSummary {
         return try await get(path: "/reactions/\(postId)", authenticated: true)
     }

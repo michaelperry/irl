@@ -97,6 +97,22 @@ export const reactions = pgTable(
   ]
 );
 
+// Reactions on comments — mirrors `reactions` for posts. Single-replace per user
+// per comment via composite PK.
+export const commentReactions = pgTable(
+  "comment_reactions",
+  {
+    commentId: uuid("comment_id").notNull().references(() => comments.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.commentId, table.userId] }),
+    index("comment_reactions_comment_idx").on(table.commentId),
+  ]
+);
+
 export const comments = pgTable(
   "comments",
   {

@@ -65,6 +65,41 @@ reactions.delete("/:postId", async (c) => {
   return c.json({ removed: true });
 });
 
+// ---------- Comment reactions ----------
+
+reactions.put("/comment/:commentId", async (c) => {
+  const userId = c.get("userId");
+  const commentId = c.req.param("commentId");
+  const { kind } = await c.req.json();
+
+  if (!isValidKind(kind)) {
+    return c.json({ error: "invalid reaction kind", allowed: REACTION_KINDS }, 400);
+  }
+
+  const db = createDb();
+  await db
+    .insert(schema.commentReactions)
+    .values({ commentId, userId, kind })
+    .onConflictDoUpdate({
+      target: [schema.commentReactions.commentId, schema.commentReactions.userId],
+      set: { kind, createdAt: new Date() },
+    });
+
+  return c.json({ kind });
+});
+
+reactions.delete("/comment/:commentId", async (c) => {
+  const userId = c.get("userId");
+  const commentId = c.req.param("commentId");
+  const db = createDb();
+  await db
+    .delete(schema.commentReactions)
+    .where(
+      and(eq(schema.commentReactions.commentId, commentId), eq(schema.commentReactions.userId, userId))
+    );
+  return c.json({ removed: true });
+});
+
 // Get reaction summary for a post: counts by kind + your current reaction
 reactions.get("/:postId", async (c) => {
   const userId = c.get("userId");

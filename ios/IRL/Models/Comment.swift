@@ -9,12 +9,16 @@ struct Comment: Identifiable, Codable {
     let createdAt: String
     /// Sealed key envelope addressed to the requesting user, if any. Nil for plaintext fallback.
     let myEnvelope: String?
+    /// Per-kind counts of reactions on this comment. Empty when no reactions yet.
+    var reactionCounts: [String: Int]?
+    /// The requesting user's current reaction kind on this comment, if any.
+    var myReaction: String?
 
     /// Plaintext, decrypted client-side after fetch. Not part of server payload.
     var decryptedContent: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, postId, userId, parentCommentId, encryptedContent, createdAt, myEnvelope
+        case id, postId, userId, parentCommentId, encryptedContent, createdAt, myEnvelope, reactionCounts, myReaction
     }
 }
 
