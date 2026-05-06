@@ -55,7 +55,11 @@ struct IRLApp: App {
                 .environmentObject(authService)
                 .environmentObject(screenTimeService)
                 .environmentObject(postStore)
-                .preferredColorScheme(selectedTheme.colorScheme)
+                // Force dark across the entire app: the IRL design language is "earth at night",
+                // and the codebase mixes hardcoded white text with adaptive colors. Light-mode
+                // rendering would need a real design pass before it can be re-enabled — until
+                // then the appearance picker is hidden in Settings.
+                .preferredColorScheme(.dark)
 
                 // Lock screen overlay — requires Face ID to unlock
                 if isLocked && authService.isAuthenticated {

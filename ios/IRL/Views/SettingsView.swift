@@ -39,31 +39,8 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             List {
-                // Appearance
-                Section {
-                    ForEach(AppTheme.allCases, id: \.self) { theme in
-                        Button {
-                            selectedTheme = theme
-                        } label: {
-                            HStack(spacing: 12) {
-                                Image(systemName: theme.icon)
-                                    .font(.system(size: 16))
-                                    .foregroundStyle(IRLColors.oceanBlue)
-                                    .frame(width: 24)
-                                Text(theme.rawValue)
-                                    .foregroundStyle(IRLColors.primaryText)
-                                Spacer()
-                                if selectedTheme == theme {
-                                    Image(systemName: "checkmark")
-                                        .foregroundStyle(IRLColors.earthGreen)
-                                        .font(.system(size: 14, weight: .semibold))
-                                }
-                            }
-                        }
-                    }
-                } header: {
-                    Text("Appearance")
-                }
+                // Appearance picker is hidden until we ship a real light-mode design pass.
+                // The app is currently forced to dark in IRLApp.
 
                 // Wellbeing
                 Section {
