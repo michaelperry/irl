@@ -439,6 +439,7 @@ struct FeedView: View {
                 }
             }
         }
+        .scrollDismissesKeyboard(.immediately)
         .refreshable {
             await postStore.syncFromServer()
             await refreshStories()
