@@ -146,177 +146,31 @@ struct FeedView: View {
     @State private var storyGroups: [StoryGroup] = []
     @State private var viewerGroupIndex: Int?
     @State private var showStoryComposer = false
+    @State private var chromeMode: ChromeMode = .full
+    @State private var scrollOffset: CGFloat = 0
+    @FocusState private var searchFocused: Bool
+
+    enum ChromeMode { case full, compact }
 
     var body: some View {
         NavigationStack {
-            ScrollView(showsIndicators: false) {
-                if !searchText.isEmpty {
-                    searchPlaceholder
-                } else {
-                    StoryRingsBar(
-                        groups: storyGroups,
-                        onTapGroup: { group in
-                            if let i = storyGroups.firstIndex(where: { $0.authorId == group.authorId }) {
-                                viewerGroupIndex = i
-                            }
-                        },
-                        onTapAddOwn: { showStoryComposer = true }
-                    )
-
-                    if filteredPosts.isEmpty {
-                        emptyStateForFilter
-                    } else {
-                        LazyVStack(spacing: 0) {
-                            ForEach(filteredPosts) { post in
-                                FeedPostCard(post: post, postStore: postStore, onWhyTapped: {
-                                    selectedWhyPost = post
-                                    showWhySheet = true
-                                })
-                            }
-                        }
-                    }
-                }
-            }
-            .refreshable {
-                await postStore.syncFromServer()
-                await refreshStories()
-                await refreshUnread()
+            ZStack(alignment: .top) {
+                feedScrollView
+                feedChromeOverlay
             }
             .background(IRLColors.deepSpace.ignoresSafeArea())
-            .searchable(text: $searchText, prompt: "Search people, interests, or places...")
+            .toolbar(.hidden, for: .navigationBar)
             .onChange(of: searchText) { _, newValue in
                 triggerSearch(for: newValue)
             }
             .onChange(of: searchCategory) { _, _ in
                 triggerSearch(for: searchText)
             }
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button { showWorldMap = true } label: {
-                        HStack(spacing: 6) {
-                            Image("EarthBluMarble")
-                                .resizable()
-                                .scaledToFill()
-                                .frame(width: 34, height: 34)
-                                .clipShape(Circle())
-                            Text("irl")
-                                .font(.system(size: 22, weight: .black, design: .rounded))
-                                .foregroundStyle(IRLColors.primaryText)
-                                .tracking(2)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { showMessages = true } label: {
-                        ZStack(alignment: .topTrailing) {
-                            Image(systemName: "paperplane")
-                                .font(.system(size: 16))
-                                .foregroundStyle(IRLColors.primaryText)
-                                .frame(width: 32, height: 32)
-                            if unreadMessages > 0 {
-                                Text(unreadMessages > 99 ? "99+" : "\(unreadMessages)")
-                                    .font(.system(size: 9, weight: .bold, design: .rounded))
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, 4)
-                                    .padding(.vertical, 1)
-                                    .background(IRLColors.oceanBlue)
-                                    .clipShape(Capsule())
-                                    .offset(x: 4, y: -2)
-                            }
-                        }
-                    }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { showActivity = true } label: {
-                        ZStack(alignment: .topTrailing) {
-                            Image(systemName: "bell")
-                                .font(.system(size: 16))
-                                .foregroundStyle(IRLColors.primaryText)
-                                .frame(width: 32, height: 32)
-                            if unreadActivity > 0 {
-                                Text(unreadActivity > 99 ? "99+" : "\(unreadActivity)")
-                                    .font(.system(size: 9, weight: .bold, design: .rounded))
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, 4)
-                                    .padding(.vertical, 1)
-                                    .background(Color.red)
-                                    .clipShape(Capsule())
-                                    .offset(x: 4, y: -2)
-                            }
-                        }
-                    }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        // Filter section
-                        Section("Show me") {
-                            ForEach(FeedFilter.allCases, id: \.self) { filter in
-                                Button {
-                                    feedFilter = filter
-                                } label: {
-                                    Label(filter.label, systemImage: filter.icon)
-                                    if feedFilter == filter {
-                                        Image(systemName: "checkmark")
-                                    }
-                                }
-                            }
-                        }
-
-                        // Sort section
-                        Section("Sort by") {
-                            ForEach(FeedSort.allCases, id: \.self) { sort in
-                                Button {
-                                    sortOrder = sort
-                                } label: {
-                                    Label(sort.label, systemImage: sort.icon)
-                                    if sortOrder == sort {
-                                        Image(systemName: "checkmark")
-                                    }
-                                }
-                            }
-                        }
-
-                        Divider()
-
-                        // World map
-                        Button {
-                            showWorldMap = true
-                        } label: {
-                            Label("Explore Pins", systemImage: "map.fill")
-                        }
-
-                        // Transparency
-                        Button {
-                            showFeedSettings = true
-                        } label: {
-                            Label("Feed Transparency", systemImage: "eye")
-                        }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: feedFilter.icon)
-                                .font(.system(size: 13))
-                            Text(feedFilter.label)
-                                .font(.system(size: 13, weight: .semibold, design: .rounded))
-                            Image(systemName: "chevron.down")
-                                .font(.system(size: 10, weight: .bold))
-                        }
-                        .foregroundStyle(IRLColors.primaryText)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(.white.opacity(0.1))
-                        .clipShape(Capsule())
-                    }
-                }
-            }
-            .toolbarBackground(IRLColors.deepSpace, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
             .task {
                 await refreshUnread()
                 await refreshStories()
                 await postStore.syncFromServer()
             }
-            .refreshable { await refreshStories() }
             .onChange(of: showActivity) { _, isOpen in
                 if !isOpen { Task { await refreshUnread() } }
             }
@@ -553,6 +407,254 @@ struct FeedView: View {
             .padding(.horizontal, 16)
             .padding(.top, 12)
         }
+    }
+
+    // MARK: - Level 3 Glass Chrome
+
+    /// The scroll content. Tracks vertical offset via a transparent GeometryReader
+    /// pinned to the top so we can drive chrome compaction.
+    private var feedScrollView: some View {
+        ScrollView(showsIndicators: false) {
+            GeometryReader { geo in
+                Color.clear
+                    .preference(key: ScrollOffsetKey.self,
+                                value: -geo.frame(in: .named("feed")).minY)
+            }
+            .frame(height: 0)
+
+            // Top spacer that clears the chrome overlay at rest.
+            Color.clear.frame(height: chromeContentInset)
+
+            if !searchText.isEmpty {
+                searchPlaceholder
+            } else if filteredPosts.isEmpty {
+                emptyStateForFilter
+            } else {
+                LazyVStack(spacing: 0) {
+                    ForEach(filteredPosts) { post in
+                        FeedPostCard(post: post, postStore: postStore, onWhyTapped: {
+                            selectedWhyPost = post
+                            showWhySheet = true
+                        })
+                    }
+                }
+            }
+        }
+        .coordinateSpace(name: "feed")
+        .onPreferenceChange(ScrollOffsetKey.self) { offset in
+            scrollOffset = offset
+            let isCompact = offset > 80
+            let target: ChromeMode = isCompact ? .compact : .full
+            if target != chromeMode {
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                    chromeMode = target
+                }
+            }
+        }
+        .refreshable {
+            await postStore.syncFromServer()
+            await refreshStories()
+            await refreshUnread()
+        }
+    }
+
+    /// Inset under the chrome at full mode (so first post starts below the chrome).
+    private var chromeContentInset: CGFloat {
+        chromeMode == .compact ? 60 : 188
+    }
+
+    /// Two-pill chrome overlay: globe pill (left) + unified search/actions/rings pill (right).
+    private var feedChromeOverlay: some View {
+        HStack(alignment: .top, spacing: 10) {
+            globePill
+            rightChromePill
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 6)
+    }
+
+    private var globePill: some View {
+        Button { showWorldMap = true } label: {
+            EarthView(autoRotate: true)
+                .frame(width: 44, height: 44)
+                .clipShape(Circle())
+                .padding(4)
+        }
+        .buttonStyle(.plain)
+        .irlGlassPill(shape: Circle())
+    }
+
+    /// Unified pill: search field + actions on row 1, story rings on row 2.
+    /// Wrapped in a GlassEffectContainer on iOS 26+ so the children blend.
+    @ViewBuilder
+    private var rightChromePill: some View {
+        if #available(iOS 26.0, *) {
+            GlassEffectContainer(spacing: 4) {
+                rightChromeStack
+            }
+        } else {
+            rightChromeStack
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 26, style: .continuous)
+                        .stroke(.white.opacity(0.08), lineWidth: 0.5)
+                )
+        }
+    }
+
+    private var rightChromeStack: some View {
+        VStack(spacing: 0) {
+            searchAndActionsRow
+            if chromeMode == .full {
+                StoryRingsBar(
+                    groups: storyGroups,
+                    onTapGroup: { group in
+                        if let i = storyGroups.firstIndex(where: { $0.authorId == group.authorId }) {
+                            viewerGroupIndex = i
+                        }
+                    },
+                    onTapAddOwn: { showStoryComposer = true }
+                )
+                .frame(maxWidth: .infinity)
+                .transition(.asymmetric(
+                    insertion: .opacity.combined(with: .move(edge: .top)),
+                    removal: .opacity.combined(with: .move(edge: .top))
+                ))
+            }
+        }
+    }
+
+    private var searchAndActionsRow: some View {
+        HStack(spacing: 8) {
+            // Search — full text field at rest, magnifier-only when compact.
+            if chromeMode == .full {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.55))
+                    TextField("Search", text: $searchText)
+                        .focused($searchFocused)
+                        .font(.system(size: 14, design: .rounded))
+                        .foregroundStyle(IRLColors.primaryText)
+                        .submitLabel(.search)
+                }
+                .padding(.horizontal, 10)
+                .frame(height: 32)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            } else {
+                Button {
+                    withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                        chromeMode = .full
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                        searchFocused = true
+                    }
+                } label: {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(IRLColors.primaryText)
+                        .frame(width: 36, height: 32)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+
+            actionsTrio
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
+    }
+
+    private var actionsTrio: some View {
+        HStack(spacing: 0) {
+            actionButton {
+                ZStack(alignment: .topTrailing) {
+                    Image(systemName: "paperplane")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(IRLColors.primaryText)
+                        .frame(width: 32, height: 32)
+                    if unreadMessages > 0 {
+                        unreadBadge(count: unreadMessages, color: IRLColors.oceanBlue)
+                            .offset(x: 2, y: -2)
+                    }
+                }
+            } action: { showMessages = true }
+
+            actionDivider
+
+            actionButton {
+                ZStack(alignment: .topTrailing) {
+                    Image(systemName: "bell")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(IRLColors.primaryText)
+                        .frame(width: 32, height: 32)
+                    if unreadActivity > 0 {
+                        unreadBadge(count: unreadActivity, color: .red)
+                            .offset(x: 2, y: -2)
+                    }
+                }
+            } action: { showActivity = true }
+
+            actionDivider
+
+            Menu {
+                Section("Show me") {
+                    ForEach(FeedFilter.allCases, id: \.self) { filter in
+                        Button {
+                            feedFilter = filter
+                        } label: {
+                            Label(filter.label, systemImage: filter.icon)
+                            if feedFilter == filter { Image(systemName: "checkmark") }
+                        }
+                    }
+                }
+                Section("Sort by") {
+                    ForEach(FeedSort.allCases, id: \.self) { sort in
+                        Button {
+                            sortOrder = sort
+                        } label: {
+                            Label(sort.label, systemImage: sort.icon)
+                            if sortOrder == sort { Image(systemName: "checkmark") }
+                        }
+                    }
+                }
+                Divider()
+                Button { showWorldMap = true } label: {
+                    Label("Explore Pins", systemImage: "map.fill")
+                }
+                Button { showFeedSettings = true } label: {
+                    Label("Feed Transparency", systemImage: "eye")
+                }
+            } label: {
+                Image(systemName: feedFilter.icon)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(IRLColors.primaryText)
+                    .frame(width: 32, height: 32)
+                    .contentShape(Rectangle())
+            }
+        }
+    }
+
+    private func actionButton<Content: View>(@ViewBuilder content: () -> Content, action: @escaping () -> Void) -> some View {
+        Button(action: action) { content() }
+            .buttonStyle(.plain)
+    }
+
+    private var actionDivider: some View {
+        Rectangle()
+            .fill(.white.opacity(0.08))
+            .frame(width: 0.5, height: 18)
+    }
+
+    private func unreadBadge(count: Int, color: Color) -> some View {
+        Text(count > 99 ? "99+" : "\(count)")
+            .font(.system(size: 9, weight: .bold, design: .rounded))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 1)
+            .background(color)
+            .clipShape(Capsule())
     }
 
     private func refreshUnread() async {
@@ -1623,6 +1725,31 @@ private struct VideoPlayerRepresentable: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
+}
+
+// MARK: - Scroll Offset
+
+private struct ScrollOffsetKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+// MARK: - Glass Pill
+
+extension View {
+    /// IRL chrome surface: native Liquid Glass on iOS 26+, ultraThinMaterial fallback below.
+    @ViewBuilder
+    func irlGlassPill(shape: some Shape = Capsule()) -> some View {
+        if #available(iOS 26.0, *) {
+            self.glassEffect(.regular, in: shape)
+        } else {
+            self
+                .background(.ultraThinMaterial, in: shape)
+                .overlay(shape.stroke(.white.opacity(0.08), lineWidth: 0.5))
+        }
+    }
 }
 
 #Preview {

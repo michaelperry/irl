@@ -102,9 +102,7 @@ struct LockScreenView: View {
             VStack(spacing: 24) {
                 Spacer()
 
-                Image("EarthBluMarble")
-                    .resizable()
-                    .scaledToFill()
+                EarthView(autoRotate: true)
                     .frame(width: 120, height: 120)
                     .clipShape(Circle())
                     .shadow(color: IRLColors.oceanBlue.opacity(0.3), radius: 20)
