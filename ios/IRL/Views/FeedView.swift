@@ -147,6 +147,7 @@ struct FeedView: View {
     @State private var viewerGroupIndex: Int?
     @State private var showStoryComposer = false
     @FocusState private var searchFocused: Bool
+    @State private var haloPulse = false
 
     var body: some View {
         NavigationStack {
@@ -413,16 +414,6 @@ struct FeedView: View {
                     .padding(.horizontal, 12)
                     .padding(.top, 6)
 
-                StoryRingsBar(
-                    groups: storyGroups,
-                    onTapGroup: { group in
-                        if let i = storyGroups.firstIndex(where: { $0.authorId == group.authorId }) {
-                            viewerGroupIndex = i
-                        }
-                    },
-                    onTapAddOwn: { openFirstStoryGroup() }
-                )
-
                 if !searchText.isEmpty {
                     searchPlaceholder
                 } else if filteredPosts.isEmpty {
@@ -460,6 +451,7 @@ struct FeedView: View {
 
     /// Globe is the entry to "what's happening in the world today" — opens the
     /// first available story group (or the composer when there are no groups yet).
+    /// Lights up with a green halo when there's something new today.
     private var globePill: some View {
         Button {
             openFirstStoryGroup()
@@ -469,9 +461,28 @@ struct FeedView: View {
                 .clipShape(Circle())
                 .padding(4)
                 .frame(width: chromeRowHeight, height: chromeRowHeight)
+                .overlay(
+                    Circle()
+                        .stroke(IRLColors.earthGreen, lineWidth: hasNewToday ? 2 : 0)
+                        .scaleEffect(hasNewToday && haloPulse ? 1.06 : 1.0)
+                        .opacity(hasNewToday ? 1 : 0)
+                        .animation(
+                            hasNewToday
+                                ? .easeInOut(duration: 1.6).repeatForever(autoreverses: true)
+                                : .default,
+                            value: haloPulse
+                        )
+                )
         }
         .buttonStyle(.plain)
         .irlGlassPill(shape: Circle())
+        .onAppear { haloPulse = true }
+    }
+
+    /// True when there's any unseen story group OR unread activity — the trigger for
+    /// "something new today" in the chrome.
+    private var hasNewToday: Bool {
+        storyGroups.contains(where: { $0.hasUnseen }) || unreadActivity > 0
     }
 
     /// Single-row pill: search field + actions trio at the same height as the globe.
