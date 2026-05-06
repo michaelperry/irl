@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { createDb, schema } from "../db/index.js";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, ilike, ne, notInArray, sql } from "drizzle-orm";
 import { authMiddleware } from "../middleware/auth.js";
 import { screenTimeMiddleware } from "../middleware/screentime.js";
 import type { AppVariables } from "../types.js";
@@ -17,6 +17,59 @@ export function friendLimitFor(bonusSlotsUnlocked: number): number {
 const profile = new Hono<{ Variables: AppVariables }>();
 
 profile.use("*", authMiddleware, screenTimeMiddleware);
+
+// Narrow user lookup by display-name prefix. Designed as a "find a specific person"
+// surface, not a discovery feed: requires ≥2 chars, returns at most 20 results,
+// hides anyone you've blocked or who has blocked you.
+profile.get("/search", async (c) => {
+  const userId = c.get("userId");
+  const q = (c.req.query("q") ?? "").trim();
+  if (q.length < 2) return c.json({ users: [] });
+
+  const db = createDb();
+
+  const [blocked, blockedBy] = await Promise.all([
+    db.select({ id: schema.blocks.blockedId }).from(schema.blocks).where(eq(schema.blocks.blockerId, userId)),
+    db.select({ id: schema.blocks.blockerId }).from(schema.blocks).where(eq(schema.blocks.blockedId, userId)),
+  ]);
+  const hiddenIds = [...blocked.map((r) => r.id), ...blockedBy.map((r) => r.id)];
+
+  const baseConditions = [
+    ilike(schema.users.displayNameHash, `${q}%`),
+    ne(schema.users.id, userId),
+  ];
+
+  const rows = await db
+    .select({
+      id: schema.users.id,
+      displayName: schema.users.displayNameHash,
+      encryptionPublicKey: schema.users.encryptionPublicKey,
+    })
+    .from(schema.users)
+    .where(
+      hiddenIds.length > 0
+        ? and(...baseConditions, notInArray(schema.users.id, hiddenIds))
+        : and(...baseConditions)
+    )
+    .limit(20);
+
+  // Annotate each result with whether the requester already follows them.
+  const ids = rows.map((r) => r.id);
+  const followingIds = ids.length > 0
+    ? new Set(
+        (await db
+          .select({ id: schema.follows.followingId })
+          .from(schema.follows)
+          .where(and(eq(schema.follows.followerId, userId), notInArray(schema.follows.followingId, []))))
+          .filter((f) => ids.includes(f.id))
+          .map((f) => f.id)
+      )
+    : new Set<string>();
+
+  return c.json({
+    users: rows.map((r) => ({ ...r, isFollowing: followingIds.has(r.id) })),
+  });
+});
 
 // Get your own profile
 profile.get("/me", async (c) => {
@@ -74,12 +127,12 @@ profile.put("/me", async (c) => {
 profile.post("/follow/:targetId", async (c) => {
   const userId = c.get("userId");
   const targetId = c.req.param("targetId");
-  const body = await c.req.json();
-  const { encryptedSharedKey } = body;
+  const body = await c.req.json().catch(() => ({}));
+  const { encryptedSharedKey } = body as { encryptedSharedKey?: string };
 
-  if (!encryptedSharedKey) {
-    return c.json({ error: "encryptedSharedKey required to share content" }, 400);
-  }
+  // encryptedSharedKey is optional — invite-driven and search-driven follows can be
+  // created without a sealed key; clients exchange keys lazily later, falling back
+  // to plaintext for content shared in the meantime.
 
   if (userId === targetId) {
     return c.json({ error: "Cannot follow yourself" }, 400);
@@ -118,7 +171,7 @@ profile.post("/follow/:targetId", async (c) => {
 
   await db
     .insert(schema.follows)
-    .values({ followerId: userId, followingId: targetId, encryptedSharedKey })
+    .values({ followerId: userId, followingId: targetId, encryptedSharedKey: encryptedSharedKey ?? null })
     .onConflictDoNothing();
 
   const meAfter = c.get("user");

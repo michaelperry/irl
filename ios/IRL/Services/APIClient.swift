@@ -116,6 +116,40 @@ final class APIClient {
         let createdAt: String
     }
 
+    struct SearchUser: Codable, Identifiable {
+        let id: String
+        let displayName: String
+        let encryptionPublicKey: String?
+        let isFollowing: Bool
+    }
+
+    struct SearchResponse: Codable {
+        let users: [SearchUser]
+    }
+
+    /// Narrow display-name prefix search. Returns up to 20 users; excludes self + blocked.
+    func searchUsers(query: String) async throws -> [SearchUser] {
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        guard trimmed.count >= 2 else { return [] }
+        let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? trimmed
+        let r: SearchResponse = try await get(path: "/profile/search?q=\(encoded)", authenticated: true)
+        return r.users
+    }
+
+    /// Follow a user. Returns the (potentially updated) friend limit.
+    /// Throws an APIError.serverError(409, ...) if the friend cap is reached.
+    func followUser(_ userId: String, encryptedSharedKey: String? = nil) async throws {
+        var body: [String: Any] = [:]
+        body["encryptedSharedKey"] = encryptedSharedKey ?? NSNull()
+        struct R: Codable { let followed: Bool; let friendLimit: Int? }
+        let _: R = try await post(path: "/profile/follow/\(userId)", body: body, authenticated: true)
+    }
+
+    func unfollowUser(_ userId: String) async throws {
+        struct R: Codable { let unfollowed: Bool }
+        let _: R = try await delete(path: "/profile/follow/\(userId)", authenticated: true)
+    }
+
     func getProfile() async throws -> ProfileResponse {
         return try await get(path: "/profile/me", authenticated: true)
     }

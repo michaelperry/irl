@@ -135,6 +135,10 @@ struct FeedView: View {
     @State private var showWhySheet = false
     @State private var selectedWhyPost: Post?
     @State private var showWorldMap = false
+    @State private var searchResults: [APIClient.SearchUser] = []
+    @State private var searchInFlight = false
+    @State private var searchError: String?
+    @State private var searchTask: Task<Void, Never>?
 
     var body: some View {
         NavigationStack {
@@ -159,6 +163,12 @@ struct FeedView: View {
             }
             .background(IRLColors.deepSpace.ignoresSafeArea())
             .searchable(text: $searchText, prompt: "Search people, interests, or places...")
+            .onChange(of: searchText) { _, newValue in
+                triggerSearch(for: newValue)
+            }
+            .onChange(of: searchCategory) { _, _ in
+                triggerSearch(for: searchText)
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     HStack(spacing: 6) {
@@ -348,33 +358,123 @@ struct FeedView: View {
             .padding(.top, 8)
 
             // Search results area
-            VStack(spacing: 14) {
-                Image(systemName: searchCategory.icon)
-                    .font(.system(size: 40))
-                    .foregroundStyle(IRLColors.oceanBlue.opacity(0.4))
+            if searchCategory == .friends {
+                friendsSearchResults
+            } else {
+                VStack(spacing: 14) {
+                    Image(systemName: searchCategory.icon)
+                        .font(.system(size: 40))
+                        .foregroundStyle(IRLColors.oceanBlue.opacity(0.4))
 
-                Text(searchCategory.searchTitle)
-                    .font(.system(size: 18, weight: .bold, design: .rounded))
-                    .foregroundStyle(IRLColors.primaryText)
+                    Text(searchCategory.searchTitle)
+                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                        .foregroundStyle(IRLColors.primaryText)
 
-                Text(searchCategory.searchSubtitle)
-                    .font(.system(size: 14, design: .rounded))
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
+                    Text(searchCategory.searchSubtitle)
+                        .font(.system(size: 14, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
 
-                if searchCategory == .location {
-                    // Mini globe showing activity
-                    EarthView(autoRotate: true, pins: allPostLocations)
-                        .frame(width: 120, height: 120)
-                        .clipShape(Circle())
-                        .shadow(color: IRLColors.oceanBlue.opacity(0.2), radius: 20)
-                        .padding(.top, 8)
+                    if searchCategory == .location {
+                        EarthView(autoRotate: true, pins: allPostLocations)
+                            .frame(width: 120, height: 120)
+                            .clipShape(Circle())
+                            .shadow(color: IRLColors.oceanBlue.opacity(0.2), radius: 20)
+                            .padding(.top, 8)
+                    }
                 }
+                .padding(.horizontal, 32)
+                .padding(.top, 20)
             }
-            .padding(.horizontal, 32)
-            .padding(.top, 20)
 
             Spacer()
+        }
+    }
+
+    @ViewBuilder
+    private var friendsSearchResults: some View {
+        let trimmed = searchText.trimmingCharacters(in: .whitespaces)
+        if trimmed.count < 2 {
+            VStack(spacing: 8) {
+                Image(systemName: "person.2.fill")
+                    .font(.system(size: 36))
+                    .foregroundStyle(IRLColors.oceanBlue.opacity(0.4))
+                Text("Type a name")
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .foregroundStyle(IRLColors.primaryText)
+                Text("At least 2 characters to find someone.")
+                    .font(.system(size: 12, design: .rounded))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.top, 32)
+        } else if searchInFlight && searchResults.isEmpty {
+            ProgressView().tint(.white).padding(.top, 32)
+        } else if let err = searchError {
+            Text(err)
+                .font(.system(size: 13, design: .rounded))
+                .foregroundStyle(.red.opacity(0.85))
+                .padding(.top, 24)
+        } else if searchResults.isEmpty {
+            VStack(spacing: 6) {
+                Text("No matches")
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .foregroundStyle(IRLColors.primaryText)
+                Text("Try the exact start of their name.")
+                    .font(.system(size: 12, design: .rounded))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.top, 32)
+        } else {
+            LazyVStack(spacing: 8) {
+                ForEach(searchResults) { user in
+                    UserSearchRow(user: user) { didFollow in
+                        if didFollow {
+                            if let i = searchResults.firstIndex(where: { $0.id == user.id }) {
+                                searchResults[i] = APIClient.SearchUser(
+                                    id: user.id,
+                                    displayName: user.displayName,
+                                    encryptionPublicKey: user.encryptionPublicKey,
+                                    isFollowing: true
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+        }
+    }
+
+    private func triggerSearch(for text: String) {
+        searchTask?.cancel()
+        searchError = nil
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+
+        guard searchCategory == .friends, trimmed.count >= 2 else {
+            searchResults = []
+            searchInFlight = false
+            return
+        }
+
+        searchInFlight = true
+        searchTask = Task {
+            try? await Task.sleep(for: .milliseconds(300))
+            if Task.isCancelled { return }
+            do {
+                let users = try await APIClient.shared.searchUsers(query: trimmed)
+                if Task.isCancelled { return }
+                await MainActor.run {
+                    searchResults = users
+                    searchInFlight = false
+                }
+            } catch {
+                if Task.isCancelled { return }
+                await MainActor.run {
+                    searchError = error.localizedDescription
+                    searchInFlight = false
+                }
+            }
         }
     }
 
@@ -752,6 +852,91 @@ private struct FeedPostCard: View {
             }
         } catch {
             // Silent — local state remains
+        }
+    }
+}
+
+// MARK: - User Search Row
+
+private struct UserSearchRow: View {
+    let user: APIClient.SearchUser
+    var onFollowed: (Bool) -> Void
+
+    @State private var isFollowing: Bool
+    @State private var working = false
+    @State private var capError: String?
+
+    init(user: APIClient.SearchUser, onFollowed: @escaping (Bool) -> Void) {
+        self.user = user
+        self.onFollowed = onFollowed
+        _isFollowing = State(initialValue: user.isFollowing)
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            EarthView(autoRotate: false)
+                .frame(width: 38, height: 38)
+                .clipShape(Circle())
+                .overlay(Circle().stroke(IRLColors.earthGradient, lineWidth: 1.5))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(user.displayName)
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .foregroundStyle(IRLColors.primaryText)
+                if let err = capError {
+                    Text(err)
+                        .font(.system(size: 11, design: .rounded))
+                        .foregroundStyle(.red.opacity(0.85))
+                } else if user.encryptionPublicKey == nil {
+                    Text("Will fall back to plaintext until they upgrade keys")
+                        .font(.system(size: 11, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.4))
+                }
+            }
+
+            Spacer()
+
+            Button { Task { await toggleFollow() } } label: {
+                HStack(spacing: 6) {
+                    if working { ProgressView().tint(isFollowing ? .white : .black).scaleEffect(0.8) }
+                    Text(isFollowing ? "Following" : "Add Friend")
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                }
+                .foregroundStyle(isFollowing ? .white : .black)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(isFollowing ? Color.white.opacity(0.12) : Color.white)
+                .clipShape(Capsule())
+            }
+            .disabled(working)
+            .buttonStyle(.plain)
+        }
+        .padding(12)
+        .background(.white.opacity(0.04))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private func toggleFollow() async {
+        working = true
+        capError = nil
+        defer { working = false }
+        do {
+            if isFollowing {
+                try await APIClient.shared.unfollowUser(user.id)
+                isFollowing = false
+                onFollowed(false)
+            } else {
+                try await APIClient.shared.followUser(user.id)
+                isFollowing = true
+                onFollowed(true)
+            }
+        } catch let APIError.serverError(code, message) where code == 409 {
+            // Friend cap reached. Surface the inline message inline instead of an alert.
+            capError = message.contains("friend_limit_reached")
+                ? "Your circle is full. Invite friends to unlock bonus spots."
+                : message
+        } catch {
+            capError = error.localizedDescription
         }
     }
 }
