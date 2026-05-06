@@ -7,11 +7,14 @@ struct Story: Identifiable, Codable, Hashable {
     let encryptedContent: String?
     let encryptedMediaUrl: String?
     let encryptedMediaKey: String?
+    let mediaType: String?     // "photo" | "video" — defaults to photo when absent
     let trustLevel: String
     let createdAt: String
     let expiresAt: String
     let myEnvelope: String?
     let viewed: Bool
+
+    var isVideo: Bool { mediaType == "video" }
 }
 
 struct StoryGroup: Identifiable, Codable, Hashable {

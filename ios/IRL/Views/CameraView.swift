@@ -711,14 +711,24 @@ struct CameraView: View {
     }
 
     /// Encrypt the caption (when present) under a fresh content key sealed for each
-    /// audience member, then post the photo media as base64 alongside. Video stories
-    /// are deferred for now.
+    /// audience member, then post the captured photo OR video as base64 alongside.
     private func publishAsStory(captionText: String?) {
-        guard let photo = camera.capturedPhoto else {
-            // Text-only stories use the StoryComposerSheet path; skip silently here.
+        // Capture media bytes + type before going async
+        var mediaBase64: String?
+        var mediaType: String = "photo"
+
+        if let photo = camera.capturedPhoto {
+            mediaBase64 = photo.jpegData(compressionQuality: 0.85)?.base64EncodedString()
+            mediaType = "photo"
+        } else if let videoURL = camera.recordedVideoURL,
+                  let data = try? Data(contentsOf: videoURL) {
+            mediaBase64 = data.base64EncodedString()
+            mediaType = "video"
+        } else {
+            // Text-only stories use the StoryComposerSheet path.
             return
         }
-        let mediaBase64 = photo.jpegData(compressionQuality: 0.85)?.base64EncodedString()
+
         Task {
             do {
                 let audience = (try? await APIClient.shared.getStoryAudience()) ?? []
@@ -743,10 +753,11 @@ struct CameraView: View {
                 _ = try await APIClient.shared.createStory(
                     encryptedContent: sealedCaption,
                     encryptedMediaUrl: mediaBase64,
+                    mediaType: mediaType,
                     trustLevel: importedTrustLevel.rawValue,
                     envelopes: envelopes
                 )
-                print("[IRL] Story published")
+                print("[IRL] Story published (\(mediaType))")
             } catch {
                 print("[IRL] Story publish failed: \(error.localizedDescription)")
             }

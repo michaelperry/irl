@@ -298,10 +298,11 @@ final class APIClient {
         encryptedContent: String? = nil,
         encryptedMediaUrl: String? = nil,
         encryptedMediaKey: String? = nil,
+        mediaType: String = "photo",
         trustLevel: String = "verified",
         envelopes: [(recipientId: String, sealedKey: String)] = []
     ) async throws -> Story {
-        var body: [String: Any] = ["trustLevel": trustLevel]
+        var body: [String: Any] = ["trustLevel": trustLevel, "mediaType": mediaType]
         if let encryptedContent { body["encryptedContent"] = encryptedContent }
         if let encryptedMediaUrl { body["encryptedMediaUrl"] = encryptedMediaUrl }
         if let encryptedMediaKey { body["encryptedMediaKey"] = encryptedMediaKey }

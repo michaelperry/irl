@@ -41,12 +41,14 @@ stories.post("/", async (c) => {
     encryptedContent,
     encryptedMediaUrl,
     encryptedMediaKey,
+    mediaType,
     trustLevel,
     envelopes,
   } = body as {
     encryptedContent?: string;
     encryptedMediaUrl?: string;
     encryptedMediaKey?: string;
+    mediaType?: string;
     trustLevel?: string;
     envelopes?: Array<{ recipientId: string; sealedKey: string }>;
   };
@@ -55,6 +57,7 @@ stories.post("/", async (c) => {
     return c.json({ error: "Story must have content or media" }, 400);
   }
 
+  const safeMediaType = mediaType === "video" ? "video" : "photo";
   const expiresAt = new Date(Date.now() + STORY_TTL_MS);
 
   const db = createDb();
@@ -65,6 +68,7 @@ stories.post("/", async (c) => {
       encryptedContent: encryptedContent ?? null,
       encryptedMediaUrl: encryptedMediaUrl ?? null,
       encryptedMediaKey: encryptedMediaKey ?? null,
+      mediaType: safeMediaType,
       trustLevel: trustLevel ?? "verified",
       expiresAt,
     })
@@ -109,6 +113,7 @@ stories.get("/", async (c) => {
       encryptedContent: schema.stories.encryptedContent,
       encryptedMediaUrl: schema.stories.encryptedMediaUrl,
       encryptedMediaKey: schema.stories.encryptedMediaKey,
+      mediaType: schema.stories.mediaType,
       trustLevel: schema.stories.trustLevel,
       createdAt: schema.stories.createdAt,
       expiresAt: schema.stories.expiresAt,

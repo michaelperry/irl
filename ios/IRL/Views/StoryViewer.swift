@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import AVKit
 
 /// Full-screen tap-through viewer for a single author's stories.
 struct StoryViewer: View {
@@ -12,8 +13,12 @@ struct StoryViewer: View {
     @State private var progress: Double = 0
     @State private var ticker: Task<Void, Never>?
     @State private var paused: Bool = false
+    @State private var videoPlayer: AVPlayer?
+    @State private var videoEndObserver: NSObjectProtocol?
+    @State private var videoTempURLs: [URL] = []   // cleaned up on dismiss
 
-    private let perStorySeconds: Double = 5.0
+    private let photoDuration: Double = 5.0
+    private let maxVideoDuration: Double = 15.0    // cap for v1
 
     var body: some View {
         ZStack {
@@ -87,34 +92,26 @@ struct StoryViewer: View {
                 }
         )
         .task { startTicker() }
-        .onDisappear { ticker?.cancel() }
-        .task(id: index) { await markCurrentViewed() }
+        .onDisappear { teardown() }
+        .task(id: index) {
+            await markCurrentViewed()
+            await prepareMediaForCurrent()
+        }
     }
 
     @ViewBuilder
     private var currentBody: some View {
         let s = group.stories[index]
-        // Decrypt envelope-protected text content if present.
-        let plain: String? = {
-            guard let cipher = s.encryptedContent else { return nil }
-            if let env = s.myEnvelope,
-               let key = try? CryptoService.openSealedKey(env),
-               let text = try? CryptoService.decryptContent(cipher, under: key) {
-                return text
-            }
-            // Fallback: caller may have stored plaintext when envelopes were absent.
-            return cipher
-        }()
-
-        let mediaImage: UIImage? = {
-            guard let raw = s.encryptedMediaUrl,
-                  let data = Data(base64Encoded: raw) else { return nil }
-            return UIImage(data: data)
-        }()
+        let plain = decryptedCaption(for: s)
 
         ZStack {
-            if let mediaImage {
-                Image(uiImage: mediaImage)
+            if s.isVideo, let player = videoPlayer {
+                VideoPlayer(player: player)
+                    .ignoresSafeArea()
+            } else if !s.isVideo, let raw = s.encryptedMediaUrl,
+                      let data = Data(base64Encoded: raw),
+                      let image = UIImage(data: data) {
+                Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -125,25 +122,39 @@ struct StoryViewer: View {
                 Spacer()
                 if let plain, !plain.isEmpty {
                     Text(plain)
-                        .font(.system(size: mediaImage == nil ? 26 : 18, weight: .semibold, design: .rounded))
+                        .font(.system(size: hasMedia(s) ? 18 : 26, weight: .semibold, design: .rounded))
                         .foregroundStyle(.white)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 24)
                         .padding(.vertical, 14)
                         .background(
-                            mediaImage == nil
-                                ? AnyShapeStyle(Color.clear)
-                                : AnyShapeStyle(LinearGradient(colors: [.clear, .black.opacity(0.55)], startPoint: .top, endPoint: .bottom))
+                            hasMedia(s)
+                                ? AnyShapeStyle(LinearGradient(colors: [.clear, .black.opacity(0.55)], startPoint: .top, endPoint: .bottom))
+                                : AnyShapeStyle(Color.clear)
                         )
                 }
-                if mediaImage == nil && (plain == nil || plain?.isEmpty == true) {
+                if !hasMedia(s) && (plain == nil || plain?.isEmpty == true) {
                     Text("[unable to decrypt]")
                         .font(.system(size: 16, design: .rounded))
                         .foregroundStyle(.white.opacity(0.5))
                 }
-                Spacer().frame(height: mediaImage == nil ? 0 : 80)
+                Spacer().frame(height: hasMedia(s) ? 80 : 0)
             }
         }
+    }
+
+    private func hasMedia(_ s: Story) -> Bool {
+        s.encryptedMediaUrl != nil
+    }
+
+    private func decryptedCaption(for s: Story) -> String? {
+        guard let cipher = s.encryptedContent else { return nil }
+        if let env = s.myEnvelope,
+           let key = try? CryptoService.openSealedKey(env),
+           let text = try? CryptoService.decryptContent(cipher, under: key) {
+            return text
+        }
+        return cipher
     }
 
     private func fillFor(_ i: Int) -> Double {
@@ -161,14 +172,74 @@ struct StoryViewer: View {
                 try? await Task.sleep(nanoseconds: stepMs * 1_000_000)
                 if Task.isCancelled { return }
                 if paused { continue }
-                await MainActor.run {
-                    progress += Double(stepMs) / 1000.0 / perStorySeconds
-                    if progress >= 1 {
-                        goNext()
+                // Videos drive their own progress via the player's currentTime; photos use the timer.
+                let s = group.stories[index]
+                if s.isVideo {
+                    await MainActor.run {
+                        if let player = videoPlayer {
+                            let cur = CMTimeGetSeconds(player.currentTime())
+                            progress = min(1, cur / maxVideoDuration)
+                        }
+                    }
+                } else {
+                    await MainActor.run {
+                        progress += Double(stepMs) / 1000.0 / photoDuration
+                        if progress >= 1 { goNext() }
                     }
                 }
             }
         }
+    }
+
+    private func prepareMediaForCurrent() async {
+        let s = group.stories[index]
+        // Tear down previous player
+        if let observer = videoEndObserver {
+            NotificationCenter.default.removeObserver(observer)
+            videoEndObserver = nil
+        }
+        videoPlayer?.pause()
+        videoPlayer = nil
+
+        guard s.isVideo, let raw = s.encryptedMediaUrl, let data = Data(base64Encoded: raw) else {
+            return
+        }
+
+        // Write to a temp file so AVPlayer can play it
+        let tmpURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("story_\(s.id).mov")
+        do {
+            try data.write(to: tmpURL, options: .atomic)
+            videoTempURLs.append(tmpURL)
+        } catch {
+            print("[IRL] story video write failed: \(error.localizedDescription)")
+            return
+        }
+
+        let player = AVPlayer(url: tmpURL)
+        player.isMuted = false
+        await MainActor.run {
+            videoPlayer = player
+            videoEndObserver = NotificationCenter.default.addObserver(
+                forName: .AVPlayerItemDidPlayToEndTime,
+                object: player.currentItem,
+                queue: .main
+            ) { _ in
+                goNext()
+            }
+            player.play()
+        }
+    }
+
+    private func teardown() {
+        ticker?.cancel()
+        if let observer = videoEndObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        videoPlayer?.pause()
+        videoPlayer = nil
+        for url in videoTempURLs { try? FileManager.default.removeItem(at: url) }
+        videoTempURLs = []
     }
 
     private func goNext() {

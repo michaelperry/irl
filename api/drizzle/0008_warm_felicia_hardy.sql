@@ -1,0 +1,1 @@
+ALTER TABLE "stories" ADD COLUMN "media_type" text DEFAULT 'photo' NOT NULL;

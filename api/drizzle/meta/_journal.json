@@ -57,6 +57,13 @@
       "when": 1778089079692,
       "tag": "0007_steep_mandarin",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1778090203242,
+      "tag": "0008_warm_felicia_hardy",
+      "breakpoints": true
     }
   ]
 }

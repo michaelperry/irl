@@ -224,6 +224,7 @@ export const stories = pgTable(
     encryptedContent: text("encrypted_content"),
     encryptedMediaUrl: text("encrypted_media_url"),
     encryptedMediaKey: text("encrypted_media_key"),
+    mediaType: text("media_type").notNull().default("photo"), // photo|video — discriminator for the viewer
     trustLevel: text("trust_level").notNull().default("verified"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     expiresAt: timestamp("expires_at").notNull(),
