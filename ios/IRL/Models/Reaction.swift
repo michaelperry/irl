@@ -38,6 +38,17 @@ enum ReactionKind: String, CaseIterable, Codable {
     }
 }
 
+/// Server response shape for `/reactions/:postId` — kind-keyed counts plus the
+/// requester's current reaction (if any).
+struct ReactionSummary: Codable {
+    var counts: [String: Int]   // keyed by ReactionKind raw value
+    var mine: String?           // raw value of the requester's reaction, or nil
+
+    static let empty = ReactionSummary(counts: [:], mine: nil)
+
+    var myKind: ReactionKind? { mine.flatMap(ReactionKind.init(rawValue:)) }
+}
+
 // MARK: - Branded glyph (hand-drawn SwiftUI faces)
 
 /// Branded reaction icon used everywhere a reaction is shown in the UI.
