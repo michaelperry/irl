@@ -699,6 +699,9 @@ private struct FeedPostCard: View {
     @State private var reactionCounts: [ReactionKind: Int] = [:]
     @State private var myReaction: ReactionKind?
     @State private var showReactionBar = false
+    @State private var floatingReactions: [FloatingReaction] = []
+    @State private var burstingKind: ReactionKind?
+    @State private var burstId: UUID = UUID()
     @State private var showPostDetail = false
     @State private var showComments = false
     @State private var showReportSheet = false
@@ -785,21 +788,28 @@ private struct FeedPostCard: View {
                         ForEach(ReactionKind.allCases, id: \.self) { kind in
                             let isMine = myReaction == kind
                             Button {
+                                triggerReactionEffects(for: kind)
                                 withAnimation(.spring(response: 0.25, dampingFraction: 0.6)) {
                                     setReaction(kind)
                                 }
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
                                     withAnimation(.easeOut(duration: 0.2)) {
                                         showReactionBar = false
                                     }
                                 }
                             } label: {
-                                ReactionGlyph(kind: kind, size: 26)
-                                    .scaleEffect(isMine ? 1.15 : 1.0)
-                                    .frame(width: 44, height: 44)
-                                    .background(isMine ? IRLColors.oceanBlue.opacity(0.15) : .clear)
-                                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                                    .contentShape(Rectangle())
+                                ZStack {
+                                    if burstingKind == kind {
+                                        ReactionBurst(kind: kind)
+                                            .id(burstId)
+                                    }
+                                    ReactionGlyph(kind: kind, size: 26)
+                                        .scaleEffect(isMine ? 1.15 : 1.0)
+                                }
+                                .frame(width: 44, height: 44)
+                                .background(isMine ? IRLColors.oceanBlue.opacity(0.15) : .clear)
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                                .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
                         }
@@ -813,6 +823,16 @@ private struct FeedPostCard: View {
                         insertion: .scale(scale: 0.6, anchor: .bottomLeading).combined(with: .opacity),
                         removal: .scale(scale: 0.8, anchor: .bottomLeading).combined(with: .opacity)
                     ))
+                    .overlay(alignment: .top) {
+                        ZStack {
+                            ForEach(floatingReactions) { fr in
+                                FloatingReactionView(reaction: fr)
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 0)
+                        .allowsHitTesting(false)
+                    }
                 }
 
                 // Action row — react button + comment + menu + info
@@ -979,6 +999,23 @@ private struct FeedPostCard: View {
     }
 
     // MARK: - Reactions
+
+    /// Heavy reaction tap effect: particle burst at the bar button + a glyph that
+    /// flies up off the post. Path-style satisfaction.
+    private func triggerReactionEffects(for kind: ReactionKind) {
+        // Burst on the bar button
+        burstId = UUID()
+        burstingKind = kind
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+            if burstingKind == kind { burstingKind = nil }
+        }
+        // Fly-up overlay
+        let id = UUID()
+        floatingReactions.append(FloatingReaction(id: id, kind: kind))
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            floatingReactions.removeAll { $0.id == id }
+        }
+    }
 
     private func setReaction(_ kind: ReactionKind) {
         let previous = myReaction
@@ -1691,6 +1728,79 @@ private struct VideoPlayerRepresentable: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
+}
+
+// MARK: - Reaction effects
+
+struct FloatingReaction: Identifiable, Equatable {
+    let id: UUID
+    let kind: ReactionKind
+}
+
+/// A reaction glyph that lifts up off the post and fades — Path/iMessage tapback feel.
+private struct FloatingReactionView: View {
+    let reaction: FloatingReaction
+
+    @State private var offsetY: CGFloat = 0
+    @State private var scale: CGFloat = 0.6
+    @State private var opacity: Double = 0
+    @State private var horizontalDrift: CGFloat = 0
+
+    var body: some View {
+        ReactionGlyph(kind: reaction.kind, size: 56)
+            .shadow(color: reaction.kind.tint.opacity(0.55), radius: 18)
+            .offset(x: horizontalDrift, y: offsetY)
+            .scaleEffect(scale)
+            .opacity(opacity)
+            .onAppear { animate() }
+    }
+
+    private func animate() {
+        // Burst in fast, drift up slowly, fade out near the end.
+        horizontalDrift = CGFloat.random(in: -18...18)
+        withAnimation(.spring(response: 0.32, dampingFraction: 0.55)) {
+            scale = 1.4
+            opacity = 1
+        }
+        withAnimation(.easeOut(duration: 0.85).delay(0.05)) {
+            offsetY = -180
+        }
+        withAnimation(.easeIn(duration: 0.35).delay(0.5)) {
+            scale = 1.0
+            opacity = 0
+        }
+    }
+}
+
+/// A radial particle burst — eight small dots fly outward from the tap point and fade.
+private struct ReactionBurst: View {
+    let kind: ReactionKind
+
+    @State private var animateOut = false
+
+    private let particleCount = 8
+    private let radius: CGFloat = 28
+
+    var body: some View {
+        ZStack {
+            ForEach(0..<particleCount, id: \.self) { i in
+                let angle = (Double(i) / Double(particleCount)) * .pi * 2
+                let dx = animateOut ? cos(angle) * radius : 0
+                let dy = animateOut ? sin(angle) * radius : 0
+                Circle()
+                    .fill(kind.tint)
+                    .frame(width: 6, height: 6)
+                    .offset(x: dx, y: dy)
+                    .opacity(animateOut ? 0 : 1)
+                    .scaleEffect(animateOut ? 0.4 : 1.0)
+            }
+        }
+        .onAppear {
+            withAnimation(.easeOut(duration: 0.55)) {
+                animateOut = true
+            }
+        }
+    }
 }
 
 // MARK: - Glass Pill
