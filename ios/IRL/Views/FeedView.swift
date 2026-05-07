@@ -516,7 +516,7 @@ struct FeedView: View {
             .contentShape(Rectangle())
 
             actionsTrio
-                .padding(.trailing, 4)
+                .padding(.trailing, 12)
         }
     }
 
